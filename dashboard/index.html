@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSC 301 OS Simulator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h1>CSC 301</h1>
+        <p>OS Simulator</p>
+
+        <button class="nav active" onclick="showPage('overview', this)">Overview</button>
+        <button class="nav" onclick="showPage('process', this)">Process Manager</button>
+        <button class="nav" onclick="showPage('memory', this)">Memory Manager</button>
+        <button class="nav" onclick="showPage('file', this)">File Manager</button>
+        <button class="nav" onclick="showPage('security', this)">Security Manager</button>
+        <button class="nav" onclick="showPage('device', this)">Device Manager</button>
+        <button class="nav" onclick="showPage('network', this)">Network Manager</button>
+        <button class="nav" onclick="showPage('parallel', this)">Parallel Computing</button>
+        <button class="nav" onclick="showPage('scenario', this)">Scenario Builder</button>
+        <button class="nav" onclick="showPage('testing', this)">Testing Center</button>
+        <button class="nav" onclick="showPage('results', this)">Results</button>
+    </div>
+
+
+    <!-- Main Content -->
+    <div class="content">
+
+        <div id="overview" class="page active-page">
+            <h1>System Overview</h1>
+            <p>Operating System Simulator Dashboard</p>
+
+            <div class="cards">
+                <div class="card">
+                    <h2>Process Manager</h2>
+                    <p>CPU scheduling and processes</p>
+                </div>
+
+                <div class="card">
+                    <h2>Memory Manager</h2>
+                    <p>Memory and page replacement</p>
+                </div>
+
+                <div class="card">
+                    <h2>File Manager</h2>
+                    <p>Files and directories</p>
+                </div>
+
+                <div class="card">
+                    <h2>Security Manager</h2>
+                    <p>Users and permissions</p>
+                </div>
+
+                <div class="card">
+                    <h2>Device Manager</h2>
+                    <p>I/O devices and requests</p>
+                </div>
+
+                <div class="card">
+                    <h2>Network Manager</h2>
+                    <p>Network nodes and packets</p>
+                </div>
+            </div>
+        </div>
+
+
+        <div id="process" class="page">
+            <h1>Process Manager</h1>
+            <p>Process manager prototype.</p>
+        </div>
+
+        <div id="memory" class="page">
+            <h1>Memory Manager</h1>
+            <p>Memory manager prototype.</p>
+        </div>
+
+        <div id="file" class="page">
+            <h1>File Manager</h1>
+            <p>File manager prototype.</p>
+        </div>
+
+        <div id="security" class="page">
+            <h1>Security Manager</h1>
+            <p>Security manager prototype.</p>
+        </div>
+
+        <div id="device" class="page">
+            <h1>Device Manager</h1>
+            <p>Device manager prototype.</p>
+        </div>
+
+        <div id="network" class="page">
+            <h1>Network Manager</h1>
+            <p>Network manager prototype.</p>
+        </div>
+
+        <div id="parallel" class="page">
+            <h1>Parallel Computing</h1>
+            <p>Parallel computing prototype.</p>
+        </div>
+
+        <div id="scenario" class="page">
+            <h1>Scenario Builder</h1>
+            <p>Build a simulation scenario.</p>
+        </div>
+
+        <div id="testing" class="page">
+            <h1>Testing Center</h1>
+            <p>Test simulation scenarios.</p>
+        </div>
+
+        <div id="results" class="page">
+            <h1>Results</h1>
+            <p>Simulation results will appear here.</p>
+        </div>
+
+    </div>
+
+    <script src="script.js"></script>
+
+</body>
+</html>
