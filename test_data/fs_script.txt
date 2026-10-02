@@ -1,0 +1,4 @@
+CREATE notes.txt
+WRITE notes.txt Hello_OS
+READ notes.txt
+DELETE notes.txt
