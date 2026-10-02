@@ -1,5 +1,4 @@
 # CSC-301-Project
-# OS Simulator
 
 ## Project Overview
 This project is a Python-based operating system simulator
