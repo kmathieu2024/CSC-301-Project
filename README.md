@@ -9,12 +9,12 @@ including process management, memory management, file systems,
 security, device management, and networking.
 
 ## Team Member Names and Roles
-**Kyla Jones-Atkinson** - Project Lead and Integration
-**Kimberly Mathieu** - Memory and Process Engineer
-**Quintin Ampofo** - File and Security Engineer
-**Danae Ludy** - Device and Network Engineer
-**Jonali Gaylor** - Dashboard and Visualization Engineer
-**Eden Hudson** - Quality and Documentation Engineer
+**Kyla Jones-Atkinson** - Project Lead and Integration <br>
+**Kimberly Mathieu** - Memory and Process Engineer <br>
+**Quintin Ampofo** - File and Security Engineer <br>
+**Danae Ludy** - Device and Network Engineer <br>
+**Jonali Gaylor** - Dashboard and Visualization Engineer <br>
+**Eden Hudson** - Quality and Documentation Engineer <br>
 
 ## Project Structure
 - src/: Simulator source code
