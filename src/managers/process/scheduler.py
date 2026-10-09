@@ -117,10 +117,10 @@ def sjf(processes: list[Process]) -> ScheduleResult:
             current_time = next_arrival
             continue
 
-        # Shortest burst first; arrival and PID break ties.
+        # Shortest burst first, arrival time breaks ties.
         process = min(
             available,
-            key=lambda p: (p.burst_time, p.arrival_time, p.pid),
+            key=lambda p: (p.burst_time, p.arrival_time),
         )
 
         start_time = current_time
@@ -136,5 +136,81 @@ def sjf(processes: list[Process]) -> ScheduleResult:
 
         current_time = completion_time
         remaining.remove(process)
+
+    return ScheduleResult(timeline, metrics)
+
+def srtf(processes: list[Process]) -> ScheduleResult:
+    validate_processes(processes)
+
+    current_time = 0
+    remaining = {p.pid: p.burst_time for p in processes}
+    start_times = {}
+    completion_times = {}
+    timeline = []
+
+    # while theres still more processes to run 
+    while len(completion_times) < len(processes):
+
+        # a process is ready when it has already arrived to the queue and has remaining burst time
+        available = [
+            p for p in processes
+            if p.arrival_time <= current_time
+            and remaining[p.pid] > 0
+        ]
+
+        # jump to the next process if none are ready 
+        if not available:
+            future = [
+                p.arrival_time for p in processes
+                if remaining[p.pid] > 0
+            ]
+            next_arrival = min(future)
+
+            timeline.append(("IDLE", current_time, next_arrival))
+            current_time = next_arrival
+            continue
+
+        # processes run based on shortest remaining time. 
+        # if there's a tie, by arrival time, and if there's another tie, in alphabetical order
+        process = min(
+            available,
+            key=lambda p: (
+                remaining[p.pid],
+                p.arrival_time,
+                p.pid
+            )
+        )
+
+        # add to start times log if not already started 
+        if process.pid not in start_times:
+            start_times[process.pid] = current_time
+
+        # if the process being ran was the one being ran before 
+        if timeline and timeline[-1][0] == process.pid:
+            pid, start, _ = timeline[-1]
+            timeline[-1] = (pid, start, current_time + 1)
+            # extend the time running on timeline
+        else:
+            # add to timeline if not already running 
+            timeline.append(
+                (process.pid, current_time, current_time + 1)
+            )
+
+        #move one time unit at a time 
+        remaining[process.pid] -= 1
+        current_time += 1
+
+        # if the process finishes update completion time logs
+        if remaining[process.pid] == 0:
+            completion_times[process.pid] = current_time
+
+    metrics = {
+        p.pid: calculate_metrics(
+            p,
+            start_times[p.pid],
+            completion_times[p.pid]
+        )
+        for p in processes
+    }
 
     return ScheduleResult(timeline, metrics)
