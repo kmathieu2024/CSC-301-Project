@@ -21,6 +21,11 @@ class Process:
     arrival_time: int
     burst_time: int
     priority: int = 0
+    state: ProcessState = ProcessState.NEW
+
+    # change states 
+    def change_state(self, new_state: ProcessState):
+        self.state = new_state
 
     # Simulation state
     remaining_time: int = 0

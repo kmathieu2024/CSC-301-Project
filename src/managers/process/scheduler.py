@@ -46,10 +46,6 @@ def validate_processes(processes: list[Process]) -> None:
         if process.burst_time <= 0:
             raise ValueError("Burst time must be positive.")
 
-# change states 
-def change_state(self, new_state: ProcessState):
-    self.state = new_state
-
 def fcfs(processes: list[Process]) -> ScheduleResult:
     # schedule with fcfs algorithm
 
