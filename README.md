@@ -8,6 +8,14 @@ The simulator will model several operating system components,
 including process management, memory management, file systems,
 security, device management, and networking.
 
+## Team Member Names and Roles
+**Kyla Jones-Atkinson** - Project Lead and Integration
+**Kimberly Mathieu** - Memory and Process Engineer
+**Quintin Ampofo** - File and Security Engineer
+**Danae Ludy** - Device and Network Engineer
+**Jonali Gaylor** - Dashboard and Visualization Engineer
+**Eden Hudson** - Quality and Documentation Engineer
+
 ## Project Structure
 - src/: Simulator source code
 - dashboard/: User interface
