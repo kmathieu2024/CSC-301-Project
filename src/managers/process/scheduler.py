@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from src.core.process import Process
+from collections import deque
 
 @dataclass
 class ScheduleResult:
@@ -196,12 +197,87 @@ def srtf(processes: list[Process]) -> ScheduleResult:
                 (process.pid, current_time, current_time + 1)
             )
 
-        #move one time unit at a time 
+        # move one time unit at a time 
         remaining[process.pid] -= 1
         current_time += 1
 
         # if the process finishes update completion time logs
         if remaining[process.pid] == 0:
+            completion_times[process.pid] = current_time
+
+    metrics = {
+        p.pid: calculate_metrics(
+            p,
+            start_times[p.pid],
+            completion_times[p.pid]
+        )
+        for p in processes
+    }
+
+    return ScheduleResult(timeline, metrics)
+
+def rr(processes: list[Process], quantum: int) -> ScheduleResult:
+
+    validate_processes(processes)
+
+    if quantum <= 0:
+        raise ValueError("Quantum must be positive.")
+
+    # sort the processes by arrival time 
+    ordered = sorted(
+        processes,
+        key=lambda p: p.arrival_time
+    )
+
+    remaining = {p.pid: p.burst_time for p in processes}
+    start_times = {}
+    completion_times = {}
+    timeline = []
+
+    ready_queue = deque()
+    current_time = 0
+    next_index = 0
+
+    while len(completion_times) < len(processes):
+        # add all ready processes to the ready queue
+        while (next_index < len(ordered) and ordered[next_index].arrival_time <= current_time):
+            ready_queue.append(ordered[next_index])
+            next_index += 1
+
+        # skip to the next event if no process is ready
+        if not ready_queue:
+            next_arrival = ordered[next_index].arrival_time
+
+            timeline.append(("IDLE", current_time, next_arrival))
+            current_time = next_arrival
+            continue
+
+        process = ready_queue.popleft()
+
+        if process.pid not in start_times:
+            start_times[process.pid] = current_time
+
+        # run until the time quantum, or if the process is shorter than the quantum until it ends
+        run_time = min(quantum, remaining[process.pid])
+
+        timeline.append(
+            (process.pid, current_time, current_time + run_time)
+        )
+
+        current_time += run_time
+        remaining[process.pid] -= run_time
+
+        # Add processes that arrived during this time slice
+        while (
+            next_index < len(ordered)
+            and ordered[next_index].arrival_time <= current_time
+        ):
+            ready_queue.append(ordered[next_index])
+            next_index += 1
+
+        if remaining[process.pid] > 0:
+            ready_queue.append(process)
+        else:
             completion_times[process.pid] = current_time
 
     metrics = {
