@@ -53,7 +53,7 @@ def validate_processes(processes: list[Process]) -> None:
 
 
 class Scheduler:
-    # only scheduling policy
+    # creates the scheduling policy 
     # The engine supplies the current time and updated Process objects
     # new Scheduler instance should be created for each simulation run or reset
 
@@ -82,6 +82,7 @@ class Scheduler:
         self._ready_wait: dict[str, int | float] = {}
 
     def on_ready(self, process: Process, current_time: int | float) -> None:
+        # records when a process is ready 
         # call when a process is ready after the state update
         if process.pid in self._ready_since:
             raise ValueError(f"Process already ready: {process.pid}")
@@ -93,6 +94,7 @@ class Scheduler:
                 self._rr_queued.add(process.pid)
 
     def on_dispatch(self, process: Process, current_time: int | float) -> None:
+        # records when a process is running 
         # call when process actually begins running, after any CS overhead.
         entered = self._ready_since.pop(process.pid, None)
         if entered is None:
@@ -114,6 +116,7 @@ class Scheduler:
             self._rr_budget = self.quantum
 
     def on_cpu_progress(self, process: Process, duration: int | float) -> None:
+        # how much of the time quantum was used in round robin
         # only RR needs to remember quantum consumed between event boundaries
         if duration < 0:
             raise ValueError("Duration cannot be negative")
@@ -127,23 +130,17 @@ class Scheduler:
     def quantum_expired(self) -> bool:
         return self.algorithm == "rr" and self._rr_active is not None and self._rr_budget <= 0
 
-    def _aging_priority(self, p: Process, current_time: int | float) -> int:
+    def aging_priority(self, p: Process, current_time: int | float) -> int:
         # Lower numeric priority is higher. Only time actually spent READY ages.
         waited = self._ready_wait.get(p.pid, 0)
         if p.pid in self._ready_since:
             waited += current_time - self._ready_since[p.pid]
         return max(0, p.priority - int(waited // self.aging_interval))
 
-    def select_next(
-        self,
-        ready: list[Process],
-        current_time: int | float,
-    ) -> SchedulingDecision:
-        """Select a READY process; no clock changes or metric calculations.
-
-        For RR this dequeues the selected process and reserves it until dispatch.
-        Call on_dispatch() once the engine starts its CPU execution.
-        """
+    def select_next(self,ready: list[Process],current_time: int | float,) -> SchedulingDecision:
+        # makes a decision of the ready processes, which should run next 
+        # For RR this dequeues the selected process and reserves it until dispatch.
+        # Call on_dispatch() once the engine starts its CPU execution.
         if not ready:
             return SchedulingDecision(None, None)
         ready_by_pid = {p.pid: p for p in ready}
@@ -165,28 +162,21 @@ class Scheduler:
                     return SchedulingDecision(p, self._rr_budget)
             raise ValueError("RR READY processes must be registered with on_ready()")
 
-        # All policies have deterministic tie-breaking: arrival, then PID.
+        # breaks ties based on arrival time in queue
         if self.algorithm == "fcfs":
-            p = min(ready, key=lambda x: (x.arrival_time, x.pid))
+            p = min(ready, key=lambda x: (x.arrival_time))
+        # breaks ties based on arrival time in the queue, then PID (alphabetical)
         elif self.algorithm == "sjf":
             p = min(ready, key=lambda x: (x.burst_time, x.arrival_time, x.pid))
+        # breaks ties based on arrival time in the queue, then PID (alphabetical)
         elif self.algorithm == "srtf":
             p = min(ready, key=lambda x: (x.remaining_time, x.arrival_time, x.pid))
         else:  # non-preemptive priority with aging
-            p = min(ready, key=lambda x: (self._aging_priority(x, current_time), x.arrival_time, x.pid))
+            p = min(ready, key=lambda x: (self.aging_priority(x, current_time), x.arrival_time, x.pid))
         return SchedulingDecision(p, None)
 
-    def should_preempt(
-        self,
-        running: Process,
-        ready: list[Process],
-        current_time: int | float,
-    ) -> bool:
-        """Only SRTF preempts on a new, strictly shorter remaining burst.
-
-        RR quantum expiration is handled separately by quantum_expired().
-        FCFS, SJF, and Priority are non-preemptive.
-        """
+    def should_preempt(self,running: Process,ready: list[Process],current_time: int | float,) -> bool:
+        # Only SRTF preempts on a new, strictly shorter remaining burst.
         if self.algorithm != "srtf" or not ready:
             return False
         best = self.select_next(ready, current_time).process
