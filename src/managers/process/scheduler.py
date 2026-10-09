@@ -11,7 +11,6 @@ class ScheduleResult:
     timeline: list[tuple[str, int, int]]
     metrics: dict[str, dict[str, int]]
 
-
 def calculate_metrics(
     process: Process,
     start_time: int,
@@ -47,6 +46,9 @@ def validate_processes(processes: list[Process]) -> None:
         if process.burst_time <= 0:
             raise ValueError("Burst time must be positive.")
 
+# change states 
+def change_state(self, new_state: ProcessState):
+    self.state = new_state
 
 def fcfs(processes: list[Process]) -> ScheduleResult:
     # schedule with fcfs algorithm
@@ -290,3 +292,135 @@ def rr(processes: list[Process], quantum: int) -> ScheduleResult:
     }
 
     return ScheduleResult(timeline, metrics)
+
+# ages the priority of the process every 4 time units
+# nonpreemptive priority scheduling
+def priority(processes: list[Process], aging_interval: int = 4) -> ScheduleResult:
+
+    validate_processes(processes)
+
+    if aging_interval <= 0:
+        raise ValueError("Aging interval must be positive.")
+
+    current_time = 0
+    remaining = list(processes)
+    timeline = []
+    metrics = {}
+
+    while remaining:
+
+        # Find processes that have arrived
+        available = [
+            p for p in remaining
+            if p.arrival_time <= current_time
+        ]
+
+        # If no process is available, skip to next arrival
+        if not available:
+            next_arrival = min(
+                p.arrival_time for p in remaining
+            )
+
+            timeline.append(
+                ("IDLE", current_time, next_arrival)
+            )
+
+            current_time = next_arrival
+            continue
+
+        # Calculate effective priority using aging
+        def effective_priority(p):
+            waiting_time = current_time - p.arrival_time
+
+            aging_steps = waiting_time // aging_interval
+
+            return max(0, p.priority - aging_steps)
+
+        # Choose the process with the highest effective priority
+        process = min(
+            available,
+            key=lambda p: (
+                effective_priority(p),
+                p.arrival_time,
+                p.pid
+            )
+        )
+
+        # Non-preemptive: run until completion
+        start_time = current_time
+        completion_time = start_time + process.burst_time
+
+        timeline.append(
+            (process.pid, start_time, completion_time)
+        )
+
+        metrics[process.pid] = calculate_metrics(
+            process,
+            start_time,
+            completion_time
+        )
+
+        current_time = completion_time
+
+        # Remove completed process
+        remaining.remove(process)
+
+    return ScheduleResult(timeline, metrics)
+
+def calculate_aggregate_metrics(
+    result: ScheduleResult
+) -> dict[str, float]:
+
+    metrics = result.metrics
+    process_count = len(metrics)
+
+    if process_count == 0:
+        return {
+            "avg_turnaround_time": 0.0,
+            "avg_waiting_time": 0.0,
+            "avg_response_time": 0.0,
+            "cpu_utilization": 0.0,
+            "throughput": 0.0,
+        }
+
+    avg_turnaround = sum(
+        m["turnaround_time"] for m in metrics.values()
+    ) / process_count
+
+    avg_waiting = sum(
+        m["waiting_time"] for m in metrics.values()
+    ) / process_count
+
+    avg_response = sum(
+        m["response_time"] for m in metrics.values()
+    ) / process_count
+
+    total_time = max(
+        m["completion_time"] for m in metrics.values()
+    )
+
+    busy_time = sum(
+        end - start
+        for pid, start, end in result.timeline
+        if pid not in ("IDLE", "CS")
+    )
+
+    # For CPU utilization, we're measuring useful process execution time divided by 
+    # total elapsed simulation time. Context-switch overhead isn't counted as useful execution.
+    cpu_utilization = (
+        busy_time / total_time * 100
+        if total_time > 0 else 0.0
+    )
+
+    throughput = (
+        process_count / total_time
+        if total_time > 0 else 0.0
+    )
+
+    return {
+        "avg_turnaround_time": avg_turnaround,
+        "avg_waiting_time": avg_waiting,
+        "avg_response_time": avg_response,
+        "cpu_utilization": cpu_utilization,
+        "throughput": throughput,
+    }
