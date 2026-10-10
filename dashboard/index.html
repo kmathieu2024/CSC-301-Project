@@ -69,7 +69,128 @@
 
         <div id="process" class="page">
             <h1>Process Manager</h1>
-            <p>Process manager prototype.</p>
+            <p>Enter processes, choose a scheduling algorithm, and control the simulation.</p>
+
+            <section class="card">
+                <h2>Scheduling Configuration</h2>
+
+                <label for="algorithm">Scheduling algorithm</label>
+                <select id="algorithm" name="algorithm">
+                    <option value="FCFS">First Come, First Served (FCFS)</option>
+                    <option value="SJF">Shortest Job First (SJF)</option>
+                    <option value="SRTF">Shortest Remaining Time First (SRTF)</option>
+                    <option value="RR">Round Robin (RR)</option>
+                    <option value="PRIORITY">Priority Scheduling</option>
+                </select>
+
+                <div class="config-field">
+                    <label for="context-switch-cost">Context-switch cost</label>
+                    <input type="number" id="context-switch-cost"
+                        min="0" step="1" value="0">
+                    <small>Time units spent switching between processes.</small>
+                    <p id="context-switch-cost-error" class="field-error" role="alert"></p>
+                </div>
+
+                <div class="config-field" id="quantum-field" hidden>
+                    <label for="time-quantum">Time quantum</label>
+                    <input type="number" id="time-quantum"
+                        min="1" step="1" value="2">
+                    <small>Time units each process receives per turn in Round Robin.</small>
+                    <p id="time-quantum-error" class="field-error" role="alert"></p>
+                </div>
+
+                <div class="config-field" id="aging-field" hidden>
+                    <label for="aging-interval">Aging interval</label>
+                    <input type="number" id="aging-interval"
+                        min="1" step="1" value="4">
+                    <small>Waiting time between priority improvements.</small>
+                    <p id="aging-interval-error" class="field-error" role="alert"></p>
+                </div>
+
+            </section>
+
+            <section class="card process-input">
+                <h2>Process Information</h2>
+                <p>Enter a process and add it to the table.</p>
+
+                <form id="process-form" novalidate>
+                    <div class="process-fields">
+                        <div>
+                            <label for="process-id">Process ID</label>
+                            <input type="text" id="process-id"
+                                placeholder="P1" required>
+                        </div>
+
+                        <div>
+                            <label for="arrival-time">Arrival time</label>
+                            <input type="number" id="arrival-time"
+                                min="0" step="1" value="0" required>
+                        </div>
+
+                        <div>
+                            <label for="burst-time">Burst time</label>
+                            <input type="number" id="burst-time"
+                                min="1" step="1" value="1" required>
+                        </div>
+
+                        <div>
+                            <label for="process-priority">Priority</label>
+                            <input type="number" id="process-priority"
+                                step="1" value="0" required>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="primary">Add Process</button>
+                </form>
+
+                <p id="process-error" role="alert"></p>
+
+                <div class="config-field">
+                    <label for="process-file">Upload process file</label>
+                    <input type="file" id="process-file" accept=".json">
+                    <small>
+                        Upload a JSON file. A valid file replaces the current process list.
+                    </small>
+                </div>
+
+                <p id="upload-status" role="status"></p>
+
+                <div class="table-container">
+                    <table class="process-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Process ID</th>
+                                <th scope="col">Arrival time</th>
+                                <th scope="col">Burst time</th>
+                                <th scope="col">Priority</th>
+                                <th scope="col">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="process-table-body">
+                            <tr>
+                                <td colspan="5">No processes added yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card simulation-controls">
+                <h2>Simulation Controls</h2>
+
+                <div class="control-buttons">
+                    <button type="button" id="run-button">Run</button>
+                    <button type="button" id="pause-button" disabled>Pause</button>
+                    <button type="button" id="step-button">Step</button>
+                    <button type="button" id="reset-button">Reset</button>
+                </div>
+
+                <p id="simulation-status" role="status">
+                    Simulation not started.
+                </p>
+
+                <p id="simulation-error" role="alert"></p>
+            </section>
         </div>
 
         <div id="memory" class="page">
