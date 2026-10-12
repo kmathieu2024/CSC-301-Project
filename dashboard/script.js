@@ -82,8 +82,9 @@ processForm.addEventListener("submit", function (event) {
         return;
     }
 
-    if (!Number.isSafeInteger(priority)) {
-        processError.textContent = "Priority must be a whole number.";
+    if (!Number.isSafeInteger(priority) || priority < 0) {
+        processError.textContent =
+            "Priority must be a whole number of 0 or greater.";
         return;
     }
 
@@ -238,8 +239,10 @@ processFileInput.addEventListener("change", async function () {
             const priority =
                 process.priority === undefined ? 0 : process.priority;
 
-            if (!Number.isSafeInteger(priority)) {
-                throw new Error(rowLabel + "priority must be a whole number.");
+            if (!Number.isSafeInteger(priority) || priority < 0) {
+                throw new Error(
+                    rowLabel + "priority must be a whole number of 0 or greater."
+                );
             }
 
             usedIds.add(pid);
