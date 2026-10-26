@@ -23,6 +23,11 @@ jobs:
 
       - name: Install test browser
         run: python -m playwright install --with-deps chromium
+        
+      - name: Start Flask server
+        run: |
+          python app.py &
+          sleep 3
 
       - name: Run tests
         run: python -m pytest tests/ -v
