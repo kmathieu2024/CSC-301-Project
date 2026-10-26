@@ -465,12 +465,12 @@ def test_controls_focus_invalid_configuration(page: Page, button):
     )
 
 @pytest.mark.parametrize("button", ["Run", "Step"])
-def test_valid_controls_report_backend_required(page: Page, button):
-    open_process_dashboard(page)
+def test_valid_controls_use_backend(page: Page, button):
+    page.goto("http://127.0.0.1:5000/")
+    page.get_by_role("button", name="Process Manager", exact=True).click()
     enter_process(page)
+
     page.get_by_role("button", name=button, exact=True).click()
 
     expect(page.locator("#simulation-error")).to_be_empty()
-    expect(page.locator("#simulation-status")).to_have_text(
-        "FCFS inputs are valid. Backend connection is required to simulate."
-    )
+    expect(page.locator("#simulation-status")).to_contain_text("Simulation time:")

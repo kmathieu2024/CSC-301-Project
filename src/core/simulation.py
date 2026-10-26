@@ -52,6 +52,7 @@ class SimulationEngine:
         self.completed = 0
         self.last_pid = None
         self.next_event_id = 0
+        self._runner = None
 
         # Add aarrivals to the event queue.
 
@@ -159,7 +160,7 @@ class SimulationEngine:
 
         self.current_time = end_time
 
-    def run(self):
+    def _execute(self):
         # Run the simulation until all processess finish.
 
         while self.completed < len(self.processes):
@@ -392,8 +393,25 @@ class SimulationEngine:
 
             self.last_pid = process.pid
 
-        return self.results()
+            yield self.results()
 
+    def step(self):
+        if self.completed == len(self.processes):
+            return self.results()
+
+        if self._runner is None:
+            self._runner = self._execute()
+
+        try:
+            return next(self._runner)
+        except StopIteration:
+            return self.results()
+
+    def run(self):
+        while self.completed < len(self.processes):
+            self.step()
+
+        return self.results()
     def results(self):
         # Calculate the final simulation results.
 

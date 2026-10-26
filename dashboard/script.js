@@ -328,33 +328,151 @@ function readWholeNumber(inputId, fieldName, minimum) {
     return value;
 }
 
-function checkSimulationInput() {
-    simulationError.textContent = "";
-    simulationStatus.textContent = "Simulation not started.";
 
-    if (!validateConfiguration()) {
-        document.querySelector('input[aria-invalid="true"]').focus();
-        return;
+let started = false;
+let running = false;
+let busy = false;
+let savedInput = "";
+
+
+// Send information to Python.
+async function sendRequest(action, data = {}) {
+    const response = await fetch("/api/" + action, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(data)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+        throw new Error(result.error || "Simulation failed");
     }
 
-    try {
-        const input = collectSimulationInput();
+    return result;
+}
 
-        simulationStatus.textContent =
-            input.algorithm + " inputs are valid. " +
-            "Backend connection is required to simulate.";
+
+// Show simulation progress.
+function showResults(result) {
+    const finished = result.processes.every(
+        process => process.state === "TERMINATED"
+    );
+
+    simulationStatus.textContent =
+        "Simulation time: " + result.current_time +
+        (finished ? " | Completed" : "");
+    
+    return finished;
+}
+
+
+// Start the simulation if needed.
+async function startSimulation() {
+    if (!validateConfiguration()) {
+        document.querySelector('input[aria-invalid="true"]').focus();
+        return false;
+    }
+
+    const input = collectSimulationInput();
+    const text = JSON.stringify(input);
+
+    if (!started || savedInput !== text) {
+        const result = await sendRequest("start", input);
+        started = true;
+        savedInput = text;
+        showResults(result);
+    }
+
+    return true;
+}
+
+
+// Run one step.
+async function stepSimulation() {
+    if (running || busy) return;
+
+    busy = true;
+    simulationError.textContent = "";
+
+    try {
+        if (await startSimulation()) {
+            showResults(await sendRequest("step"));
+        }
     } catch (error) {
         simulationError.textContent = error.message;
     }
+
+    busy = false;
 }
 
-document.getElementById("run-button").addEventListener(
-    "click", checkSimulationInput
-);
 
-document.getElementById("step-button").addEventListener(
-    "click", checkSimulationInput
-);
+// Run until finished or paused.
+async function runSimulation() {
+    if (running || busy) return;
+
+    busy = true;
+    simulationError.textContent = "";
+
+    try {
+        if (!await startSimulation()) return;
+
+        running = true;
+        document.getElementById("pause-button").disabled = false;
+
+        while (running) {
+            const finished = showResults(await sendRequest("step"));
+
+            if (finished) break;
+
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+    } catch (error) {
+        simulationError.textContent = error.message;
+    } finally {
+        running = false;
+        busy = false;
+        document.getElementById("pause-button").disabled = true;
+    }
+}
+
+
+// Pause the simulation.
+function pauseSimulation() {
+    running = false;
+    simulationStatus.textContent += " | Paused";
+}
+
+
+// Reset the simulation.
+async function resetSimulation() {
+    if (busy) {
+        running = false;
+        return;
+    }
+
+    busy = true;
+    simulationError.textContent = "";
+
+    try {
+        if (started) {
+            showResults(await sendRequest("reset"));
+        } else {
+            simulationStatus.textContent = "Simulation not started.";
+        }
+    } catch (error) {
+        simulationError.textContent = error.message;
+    } finally {
+        busy = false;
+    }
+}
+
+
+// Connect buttons.
+document.getElementById("run-button").onclick = runSimulation;
+document.getElementById("pause-button").onclick = pauseSimulation;
+document.getElementById("step-button").onclick = stepSimulation;
+document.getElementById("reset-button").onclick = resetSimulation;
 
 function collectConfiguration(algorithm) {
     const configuration = {

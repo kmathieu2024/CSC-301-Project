@@ -55,3 +55,12 @@ See docs/git_workflow.md for details.
 ## Current Status
 Milestone 1: Repository setup, architecture design,
 baseline test cases, and project documentation.
+
+### Running the Simulation Dashboard
+
+1. Install the dependencies:
+   python -m pip install -r requirements.txt
+2. Start the application:
+   python app.py
+3. Open http://127.0.0.1:5000/ in your browser.
+4. Use Run, Pause, Step, or Reset to control the simulation.
