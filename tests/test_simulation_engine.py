@@ -137,6 +137,38 @@ class TestSimulationEngine(unittest.TestCase):
 
         self.assertEqual(results["current_time"], 8)
 
+    def test_step_advances_simulation(self):
+        p1 = Process("P1", 0, 5)
+        p2 = Process("P2", 2, 3)
+
+        engine = SimulationEngine([p1, p2])
+
+        result = engine.step()
+
+        self.assertEqual(result["current_time"], 5)
+        self.assertEqual(engine.completed, 1)
+
+        result = engine.step()
+
+        self.assertEqual(result["current_time"], 8)
+        self.assertEqual(engine.completed, 2)    
+
+    def test_run_after_step(self):
+        p1 = Process("P1", 0, 5)
+        p2 = Process("P2", 2, 3)
+
+        engine = SimulationEngine([p1, p2])
+
+        engine.step()
+
+        self.assertEqual(engine.completed, 1)
+
+        result = engine.run()
+
+        self.assertEqual(result["current_time"], 8)
+        self.assertEqual(engine.completed, 2)
+        self.assertEqual(len(result["processes"]), 2)  
+
     def test_reset(self):
         # Reset should produce the same results again.
 
@@ -152,6 +184,29 @@ class TestSimulationEngine(unittest.TestCase):
         second = engine.run()
 
         self.assertEqual(first, second)
+        
+    def test_reset_after_step(self):
+        p1 = Process("P1", 0, 5)
+        p2 = Process("P2", 2, 3)
+
+        engine = SimulationEngine([p1, p2])
+
+        engine.step()
+
+        self.assertEqual(engine.completed, 1)
+        self.assertEqual(engine.current_time, 5)
+
+        engine.reset()
+
+        self.assertEqual(engine.completed, 0)
+        self.assertEqual(engine.current_time, 0)
+        self.assertEqual(len(engine.timeline), 0)
+        self.assertEqual(len(engine.events), 0)
+
+        result = engine.run()
+
+        self.assertEqual(result["current_time"], 8)
+        self.assertEqual(engine.completed, 2)
 
     def test_invalid_event(self):
         # Events cannot be scheduled in the past.
