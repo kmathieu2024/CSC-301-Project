@@ -355,14 +355,47 @@ async function sendRequest(action, data = {}) {
 
 // Show simulation progress.
 function showResults(result) {
-    const finished = result.processes.every(
-        process => process.state === "TERMINATED"
-    );
+    const completed = result.processes.filter(function (process) {
+        return process.state === "TERMINATED";
+    }).length;
+
+    const total = result.processes.length;
+    const finished = total > 0 && completed === total;
+    document.getElementById("step-button").disabled = finished;
 
     simulationStatus.textContent =
         "Simulation time: " + result.current_time +
         (finished ? " | Completed" : "");
-    
+
+    document.getElementById("result-current-time").textContent =
+        result.current_time;
+
+    document.getElementById("result-completed").textContent =
+        completed + " / " + total;
+
+    // The backend only calculates these averages after completion.
+    document.getElementById("result-average-wait").textContent =
+        finished ? result.average_waiting_time.toFixed(2) : "—";
+
+    document.getElementById("result-average-turnaround").textContent =
+        finished ? result.average_turnaround_time.toFixed(2) : "—";
+
+    // Utilization excludes idle time and context-switch overhead.
+    document.getElementById("result-utilization").textContent =
+        result.current_time > 0
+            ? result.cpu_utilization.toFixed(2) + "%"
+            : "—";
+
+    const throughput = result.current_time > 0
+        ? completed / result.current_time
+        : 0;
+
+    document.getElementById("result-throughput").textContent =
+        result.current_time > 0 ? throughput.toFixed(3) : "—";
+
+    renderGanttChart(result);
+    renderProcessMetrics(result);
+
     return finished;
 }
 
@@ -562,3 +595,127 @@ algorithmSelect.addEventListener("change", function () {
     simulationStatus.textContent = "Simulation not started.";
     validateConfiguration();
 });
+
+function renderGanttChart(result) {
+    const chart = document.getElementById("gantt-chart");
+    const emptyMessage = document.getElementById("gantt-empty");
+
+    chart.replaceChildren();
+    emptyMessage.hidden = result.timeline.length > 0;
+
+    if (result.timeline.length === 0) {
+        return;
+    }
+
+    const colors = [
+        "#c4b5fd",
+        "#93c5fd",
+        "#86efac",
+        "#f9a8d4",
+        "#a5f3fc",
+        "#fcd34d"
+    ];
+
+    // Keep each process's color consistent across updates.
+    const processColors = new Map();
+
+    result.processes.forEach(function (process, index) {
+        processColors.set(process.pid, colors[index % colors.length]);
+    });
+
+    // Use one scale for every block to preserve duration proportions.
+    // Expand short timelines so their labels have room.
+    const shortestDuration = Math.min(
+        ...result.timeline.map(function (interval) {
+            return interval.end - interval.start;
+        })
+    );
+
+    const pixelsPerUnit = Math.max(40, 90 / shortestDuration);
+
+    result.timeline.forEach(function (interval) {
+        const duration = interval.end - interval.start;
+        const block = document.createElement("div");
+
+        block.className = "gantt-block";
+        block.style.width = duration * pixelsPerUnit + "px";
+        block.setAttribute("role", "listitem");
+
+        let label = interval.pid;
+
+        if (interval.pid === "IDLE") {
+            label = "Idle";
+            block.style.backgroundColor = "#e5e7eb";
+        } else if (interval.pid === "CS") {
+            label = "Context switch";
+            block.style.backgroundColor = "#fde4b5";
+        } else {
+            block.style.backgroundColor = processColors.get(interval.pid);
+        }
+
+        const description =
+            label + ": " + interval.start + "–" + interval.end +
+            " (duration " + duration + ")";
+
+        block.title = description;
+        block.setAttribute("aria-label", description);
+
+        const name = document.createElement("strong");
+        name.textContent = label;
+
+        const times = document.createElement("small");
+        times.textContent = interval.start + "–" + interval.end;
+
+        block.appendChild(name);
+        block.appendChild(times);
+        chart.appendChild(block);
+    });
+}
+
+function renderProcessMetrics(result) {
+    const tableBody = document.getElementById("process-metrics-body");
+    tableBody.replaceChildren();
+
+    result.processes.forEach(function (process) {
+        const row = document.createElement("tr");
+
+        const pidCell = document.createElement("td");
+        pidCell.textContent = process.pid;
+        row.appendChild(pidCell);
+
+        const stateCell = document.createElement("td");
+        const badge = document.createElement("span");
+
+        badge.className =
+            "state-badge state-" + process.state.toLowerCase();
+        badge.textContent = process.state;
+
+        stateCell.appendChild(badge);
+        row.appendChild(stateCell);
+
+        const completed = process.state === "TERMINATED";
+
+        const values = [
+            process.arrival_time,
+            process.burst_time,
+            process.start_time,
+            process.completion_time,
+            completed ? process.waiting_time : null,
+            completed ? process.turnaround_time : null,
+            process.response_time
+        ];
+
+        values.forEach(function (value) {
+            const cell = document.createElement("td");
+
+            // Zero is a valid metric; only missing values become dashes.
+            cell.textContent = value === null || value === undefined
+                ? "—"
+                : value;
+
+            row.appendChild(cell);
+        });
+
+        tableBody.appendChild(row);
+    });
+}

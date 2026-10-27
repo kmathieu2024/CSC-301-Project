@@ -191,6 +191,92 @@
 
                 <p id="simulation-error" role="alert"></p>
             </section>
+
+            <section class="card simulation-results">
+                <h2>Simulation Results</h2>
+
+                <div class="metric-grid">
+                    <div class="metric">
+                        <h3>Current time</h3>
+                        <p id="result-current-time">0</p>
+                    </div>
+
+                    <div class="metric">
+                        <h3>Completed processes</h3>
+                        <p id="result-completed">0 / 0</p>
+                    </div>
+
+                    <div class="metric">
+                        <h3>Average waiting time</h3>
+                        <p id="result-average-wait">—</p>
+                    </div>
+
+                    <div class="metric">
+                        <h3>Average turnaround time</h3>
+                        <p id="result-average-turnaround">—</p>
+                    </div>
+
+                    <div class="metric">
+                        <h3>CPU utilization</h3>
+                        <p id="result-utilization">—</p>
+                    </div>
+
+                    <div class="metric">
+                        <h3>Throughput</h3>
+                        <p id="result-throughput">—</p>
+                    </div>
+                </div>
+
+                <p>Times use simulation units. Throughput is processes per time unit.
+                Average times appear when the simulation completes.</p>
+            </section>
+            <section class="card gantt-section">
+                <h2>CPU Gantt Chart</h2>
+
+                <p>Each block shows its start and end time. Width represents duration.</p>
+
+                <div class="gantt-legend">
+                    <span>Colored blocks: process execution</span>
+                    <span class="legend-idle">Idle</span>
+                    <span class="legend-switch">Context switch</span>
+                </div>
+
+                <p id="gantt-empty">No execution intervals yet.</p>
+
+                <div class="gantt-scroll">
+                    <div id="gantt-chart" class="gantt-chart"
+                        role="list" aria-label="CPU execution intervals"></div>
+                </div>
+            </section>
+
+            <section class="card process-metrics">
+                <h2>Process States and Metrics</h2>
+                <p>Waiting and turnaround times appear when each process completes.</p>
+
+                <div class="table-container">
+                    <table class="process-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Process ID</th>
+                                <th scope="col">State</th>
+                                <th scope="col">Arrival</th>
+                                <th scope="col">Burst</th>
+                                <th scope="col">First start</th>
+                                <th scope="col">Completion</th>
+                                <th scope="col">Waiting</th>
+                                <th scope="col">Turnaround</th>
+                                <th scope="col">Response</th>
+                            </tr>
+                        </thead>
+                        <tbody id="process-metrics-body">
+                            <tr>
+                                <td colspan="9">Start a simulation to view process metrics.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
         </div>
 
         <div id="memory" class="page">
