@@ -249,3 +249,128 @@ body {
 input[aria-invalid="true"] {
     border-color: #b42318;
 }
+
+.simulation-results {
+    margin-top: 24px;
+}
+
+.metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+}
+
+.metric {
+    padding: 16px;
+    background: #f3f4f6;
+    border-radius: 8px;
+}
+
+.metric h3 {
+    font-size: 14px;
+    margin: 0 0 10px;
+}
+
+.metric p {
+    margin: 0;
+    font-size: 24px;
+    font-weight: bold;
+    color: #151936;
+}
+
+.gantt-section {
+    margin-top: 24px;
+    min-width: 0;
+}
+
+.gantt-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.gantt-legend span {
+    padding: 6px 10px;
+    border-radius: 4px;
+    background: #eeeaf8;
+}
+
+.gantt-legend .legend-idle {
+    background: #e5e7eb;
+}
+
+.gantt-legend .legend-switch {
+    background: #fde4b5;
+}
+
+.gantt-scroll {
+    overflow-x: auto;
+}
+
+.gantt-chart {
+    display: flex;
+    padding: 4px 0 12px;
+}
+
+.gantt-block {
+    flex-shrink: 0;
+    padding: 12px 4px;
+    border: 1px solid white;
+    text-align: center;
+    color: #151936;
+    overflow: hidden;
+}
+
+.gantt-block strong,
+.gantt-block small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gantt-block small {
+    margin-top: 8px;
+}
+
+.content {
+    min-width: 0;
+}
+
+.process-metrics {
+    margin-top: 24px;
+}
+
+.state-badge {
+    display: inline-block;
+    padding: 5px 9px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.state-new {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.state-ready {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.state-running {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.state-waiting {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.state-terminated {
+    background: #ede9fe;
+    color: #5b21b6;
+}

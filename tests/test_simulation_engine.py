@@ -143,15 +143,34 @@ class TestSimulationEngine(unittest.TestCase):
 
         engine = SimulationEngine([p1, p2])
 
+        # First step dispatches P1 without advancing execution time.
+        result = engine.step()
+
+        self.assertEqual(result["current_time"], 0)
+        self.assertEqual(engine.completed, 0)
+        self.assertEqual(result["processes"][0]["state"], "RUNNING")
+        self.assertEqual(result["processes"][1]["state"], "NEW")
+
+        # Second step executes P1 to completion.
         result = engine.step()
 
         self.assertEqual(result["current_time"], 5)
         self.assertEqual(engine.completed, 1)
+        self.assertEqual(result["processes"][0]["state"], "TERMINATED")
+        self.assertEqual(result["processes"][1]["state"], "READY")
 
+        # Third step dispatches P2.
+        result = engine.step()
+
+        self.assertEqual(result["current_time"], 5)
+        self.assertEqual(result["processes"][1]["state"], "RUNNING")
+
+        # Fourth step completes P2.
         result = engine.step()
 
         self.assertEqual(result["current_time"], 8)
-        self.assertEqual(engine.completed, 2)    
+        self.assertEqual(engine.completed, 2)
+        self.assertEqual(result["processes"][1]["state"], "TERMINATED") 
 
     def test_run_after_step(self):
         p1 = Process("P1", 0, 5)
@@ -159,7 +178,8 @@ class TestSimulationEngine(unittest.TestCase):
 
         engine = SimulationEngine([p1, p2])
 
-        engine.step()
+        engine.step()  # Dispatch P1.
+        engine.step()  # Execute P1.
 
         self.assertEqual(engine.completed, 1)
 
@@ -191,7 +211,8 @@ class TestSimulationEngine(unittest.TestCase):
 
         engine = SimulationEngine([p1, p2])
 
-        engine.step()
+        engine.step()  # Dispatch P1.
+        engine.step()  # Execute P1.
 
         self.assertEqual(engine.completed, 1)
         self.assertEqual(engine.current_time, 5)

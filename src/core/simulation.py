@@ -267,6 +267,9 @@ class SimulationEngine:
                 old_state
             )
 
+            # Return the RUNNING state before executing the process.
+            yield self.results()
+            
             time_left = decision.max_run_time
 
             # run the selected process.
