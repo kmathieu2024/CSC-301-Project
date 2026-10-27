@@ -20,7 +20,7 @@ class Process:
     pid: str
     arrival_time: int
     burst_time: int
-    priority: int = 0
+    priority: int = 1
 
     # Simulation state
     remaining_time: int = 0
