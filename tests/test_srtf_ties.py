@@ -10,8 +10,8 @@ from src.core.simulation import SimulationEngine
 
 def test_srtf_equal_ready_processes_use_pid():
     # Create processes; enter P2 first to distinguish PID from input order
-    p2 = Process("P2", 0, 2, priority=0)
-    p1 = Process("P1", 0, 2, priority=0)
+    p2 = Process("P2", 0, 2, priority=1)
+    p1 = Process("P1", 0, 2, priority=1)
 
     # Create simulation
     engine = SimulationEngine(
@@ -75,8 +75,8 @@ def test_srtf_equal_ready_processes_use_pid():
 
 def test_srtf_equal_remaining_time_does_not_preempt():
     # Create processes for equality during execution
-    p1 = Process("P1", 0, 4, priority=0)
-    p2 = Process("P2", 1, 3, priority=0)
+    p1 = Process("P1", 0, 4, priority=1)
+    p2 = Process("P2", 1, 3, priority=1)
 
     # Create simulation
     engine = SimulationEngine(

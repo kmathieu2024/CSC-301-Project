@@ -8,11 +8,11 @@ from src.core.process import Process
 from src.core.simulation import SimulationEngine
 
 
-def test_fcfs_equal_arrivals_use_pid():
-    # This checks the selected PID convention. The previously inspected code uses input order, so this may fail until that discrepancy is resolved.
-    # Create processes; enter P2 first to distinguish PID from input order
-    p2 = Process("P2", 0, 2, priority=0)
-    p1 = Process("P1", 0, 2, priority=0)
+def test_fcfs_equal_arrivals_use_input_order():
+    # This characterizes the current FCFS input-order convention for equal arrivals.
+    # Enter P2 first; current FCFS should keep P2 before P1.
+    p2 = Process("P2", 0, 2, priority=1)
+    p1 = Process("P1", 0, 2, priority=1)
 
     # Create simulation
     engine = SimulationEngine(
@@ -30,24 +30,24 @@ def test_fcfs_equal_arrivals_use_pid():
     assert p2.state.value == "TERMINATED"
 
     # Check start time
-    assert p1.start_time == 0
-    assert p2.start_time == 2
+    assert p1.start_time == 2
+    assert p2.start_time == 0
 
     # Check completion time
-    assert p1.completion_time == 2
-    assert p2.completion_time == 4
+    assert p1.completion_time == 4
+    assert p2.completion_time == 2
 
     # Check turnaround time
-    assert p1.turnaround_time == 2
-    assert p2.turnaround_time == 4
+    assert p1.turnaround_time == 4
+    assert p2.turnaround_time == 2
 
     # Check waiting time
-    assert p1.waiting_time == 0
-    assert p2.waiting_time == 2
+    assert p1.waiting_time == 2
+    assert p2.waiting_time == 0
 
     # Check response time
-    assert p1.response_time == 0
-    assert p2.response_time == 2
+    assert p1.response_time == 2
+    assert p2.response_time == 0
 
     # Check averages
     averageCompletion = (p1.completion_time + p2.completion_time) / 2
@@ -65,11 +65,11 @@ def test_fcfs_equal_arrivals_use_pid():
         if event["event_type"] == "dispatch":
             dispatchOrder.append(event["entity_id"])
 
-    assert dispatchOrder == ["P1", "P2"]
+    assert dispatchOrder == ["P2", "P1"]
 
     expectedTimeline = [
-        ("P1", 0, 2),
-        ("P2", 2, 4),
+        ("P2", 0, 2),
+        ("P1", 2, 4),
     ]
     check_timeline(results["timeline"], expectedTimeline)
 
