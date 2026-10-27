@@ -35,7 +35,7 @@ def start():
                 item["pid"],
                 item["arrival_time"],
                 item["burst_time"],
-                item.get("priority", 0)
+                item.get("priority", 1)
             )
 
             processes.append(process)

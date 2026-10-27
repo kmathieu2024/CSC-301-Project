@@ -36,7 +36,7 @@ def prepare_simulation(page: Page, url, algorithm="FCFS"):
         page.locator("#aging-interval").fill("4")
 
     # P1 has higher priority, while P2 has the shorter burst.
-    for pid, burst, priority in [("P1", "2", "0"), ("P2", "1", "1")]:
+    for pid, burst, priority in [("P1", "2", "1"), ("P2", "1", "2")]:
         page.locator("#process-id").fill(pid)
         page.locator("#arrival-time").fill("2")
         page.locator("#burst-time").fill(burst)
@@ -68,7 +68,7 @@ def test_srtf_chart_shows_preemption(page: Page, dashboard_url):
         page.locator("#process-id").fill(pid)
         page.locator("#arrival-time").fill(arrival)
         page.locator("#burst-time").fill(burst)
-        page.locator("#process-priority").fill("0")
+        page.locator("#process-priority").fill("1")
         page.get_by_role("button", name="Add Process", exact=True).click()
 
     run_to_completion(page)

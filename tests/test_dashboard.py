@@ -56,7 +56,7 @@ def test_invalid_context_switch_blocks_process_entry(page: Page):
         ["P1", "0", "4", "1", "Remove"]
     )
 
-def test_negative_priority_rejected_and_zero_accepted(page: Page):
+def test_zero_priority_rejected_and_one_accepted(page: Page):
     dashboard = ROOT / "dashboard" / "index.html"
     page.goto(dashboard.as_uri())
     page.get_by_role("button", name="Process Manager", exact=True).click()
@@ -65,20 +65,20 @@ def test_negative_priority_rejected_and_zero_accepted(page: Page):
     page.locator("#process-id").fill("P1")
     page.locator("#arrival-time").fill("0")
     page.locator("#burst-time").fill("4")
-    page.locator("#process-priority").fill("-1")
+    page.locator("#process-priority").fill("0")
 
     page.get_by_role("button", name="Add Process", exact=True).click()
 
-    # Negative priority must be rejected.
+    # Zero priority must be rejected.
     expect(page.locator("#process-error")).to_have_text(
-        "Priority must be a whole number of 0 or greater."
+        "Priority must be a whole number of 1 or greater."
     )
     expect(page.locator("#process-table-body")).to_have_text(
         "No processes added yet."
     )
 
-    # Zero is a valid priority.
-    page.locator("#process-priority").fill("0")
+    # One is a valid priority.
+    page.locator("#process-priority").fill("1")
     page.get_by_role("button", name="Add Process", exact=True).click()
 
     expect(page.locator("#process-error")).to_be_empty()
@@ -86,10 +86,10 @@ def test_negative_priority_rejected_and_zero_accepted(page: Page):
     rows = page.locator("#process-table-body tr")
     expect(rows).to_have_count(1)
     expect(rows.first.locator("td")).to_have_text(
-        ["P1", "0", "4", "0", "Remove"]
+        ["P1", "0", "4", "1", "Remove"]
     )
 
-@pytest.mark.parametrize("invalid_priority", [-1, 1.5, "1", None, True])
+@pytest.mark.parametrize("invalid_priority", [-1, 0, 1.5, "1", None, True])
 def test_upload_rejects_invalid_priority(page: Page, invalid_priority):
     dashboard = ROOT / "dashboard" / "index.html"
     page.goto(dashboard.as_uri())
@@ -124,7 +124,7 @@ def test_upload_rejects_invalid_priority(page: Page, invalid_priority):
 
     expect(page.locator("#process-error")).to_have_text(
         "Upload failed: Process 1: priority must be a whole number "
-        "of 0 or greater."
+        "of 1 or greater."
     )
 
     # Rejected uploads must preserve the existing process and algorithm.
@@ -137,7 +137,7 @@ def test_upload_rejects_invalid_priority(page: Page, invalid_priority):
     expect(page.locator("#upload-status")).to_be_empty()
 
 
-def test_upload_defaults_missing_priority_to_zero(page: Page):
+def test_upload_defaults_missing_priority_to_one(page: Page):
     dashboard = ROOT / "dashboard" / "index.html"
     page.goto(dashboard.as_uri())
     page.get_by_role("button", name="Process Manager", exact=True).click()
@@ -170,7 +170,7 @@ def test_upload_defaults_missing_priority_to_zero(page: Page):
     rows = page.locator("#process-table-body tr")
     expect(rows).to_have_count(1)
     expect(rows.first.locator("td")).to_have_text(
-        ["P1", "0", "4", "0", "Remove"]
+        ["P1", "0", "4", "1", "Remove"]
     )
 
 def open_process_dashboard(page: Page):
@@ -289,7 +289,7 @@ def test_switching_algorithm_clears_irrelevant_error(page: Page):
         ("burst-time", "1.5",
          "Burst time must be a whole number of 1 or greater."),
         ("process-priority", "1.5",
-         "Priority must be a whole number of 0 or greater."),
+         "Priority must be a whole number of 1 or greater."),
     ],
 )
 def test_invalid_process_input(page: Page, field, value, message):
@@ -344,7 +344,7 @@ def test_valid_upload_replaces_existing_processes(page: Page):
         "algorithm": "SJF",
         "processes": [
             {"pid": "P1", "arrival_time": 0, "burst_time": 4, "priority": 1},
-            {"pid": "P2", "arrival_time": 1, "burst_time": 2, "priority": 0},
+            {"pid": "P2", "arrival_time": 1, "burst_time": 2, "priority": 1},
         ],
     }
 
@@ -363,7 +363,7 @@ def test_valid_upload_replaces_existing_processes(page: Page):
             ["P1", "0", "4", "1", "Remove"]
         )
         expect(rows.nth(1).locator("td")).to_have_text(
-            ["P2", "1", "2", "0", "Remove"]
+            ["P2", "1", "2", "1", "Remove"]
         )
 
     expect(page.locator("#algorithm")).to_have_value("SJF")

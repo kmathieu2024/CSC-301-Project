@@ -18,7 +18,7 @@ def test_priority_baseline():
 
     # Create simulation
     # Priority is non-preemptive; smaller numbers mean higher priority.
-    # Ready waiting improves priority by 1 every 4 ms, down to 0.
+    # Ready waiting improves priority by 1 every 4 ms, down to 1.
     engine = SimulationEngine(
         [p1, p2, p3, p4],
         algorithm="priority",
