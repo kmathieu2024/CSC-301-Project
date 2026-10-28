@@ -333,6 +333,7 @@ let started = false;
 let running = false;
 let busy = false;
 let savedInput = "";
+let resultsJson = "";
 
 
 // Send information to Python.
@@ -355,6 +356,9 @@ async function sendRequest(action, data = {}) {
 
 // Show simulation progress.
 function showResults(result) {
+    resultsJson = JSON.stringify(result, null, 4);
+    document.getElementById("export-results-button").disabled = false;
+
     const completed = result.processes.filter(function (process) {
         return process.state === "TERMINATED";
     }).length;
@@ -397,6 +401,31 @@ function showResults(result) {
     renderProcessMetrics(result);
 
     return finished;
+}
+
+
+// Download a snapshot of the results currently displayed on the dashboard.
+function exportResults() {
+    if (!resultsJson) return;
+
+    try {
+        const file = new Blob([resultsJson + "\n"], {
+            type: "application/json"
+        });
+        const url = URL.createObjectURL(file);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "simulation-results.json";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        // Allow the browser to begin downloading before releasing the URL.
+        setTimeout(function () {
+            URL.revokeObjectURL(url);
+        }, 1000);
+    } catch (error) {
+        simulationError.textContent = "Export failed: " + error.message;
+    }
 }
 
 
@@ -506,6 +535,7 @@ document.getElementById("run-button").onclick = runSimulation;
 document.getElementById("pause-button").onclick = pauseSimulation;
 document.getElementById("step-button").onclick = stepSimulation;
 document.getElementById("reset-button").onclick = resetSimulation;
+document.getElementById("export-results-button").onclick = exportResults;
 
 function collectConfiguration(algorithm) {
     const configuration = {

@@ -64,3 +64,9 @@ baseline test cases, and project documentation.
    python app.py
 3. Open http://127.0.0.1:5000/ in your browser.
 4. Use Run, Pause, Step, or Reset to control the simulation.
+5. In Process Manager, select **Download results (JSON)** to save the displayed
+   simulation snapshot as `simulation-results.json`. The download includes the
+   algorithm, simulation time, seed, process metrics, averages, CPU utilization,
+   timeline, and event history returned by the simulator. Partial runs and reset
+   snapshots can also be exported; averages are final only after completion.
+   The button becomes available once simulation results have been displayed.
