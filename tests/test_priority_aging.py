@@ -11,13 +11,13 @@ from src.core.simulation import SimulationEngine
 
 def test_priority_aging_changes_order():
     # Create processes
-    p1 = Process("P1", 0, 12, priority=0)
+    p1 = Process("P1", 0, 12, priority=1)
     p2 = Process("P2", 0, 2, priority=3)
     p3 = Process("P3", 10, 1, priority=1)
 
     # Create simulation
     # Priority is non-preemptive; smaller numbers mean higher priority.
-    # Ready waiting improves priority by 1 every 4 ms, down to 0.
+    # Ready waiting improves priority by 1 every 4 ms, down to 1.
     engine = SimulationEngine(
         [p1, p2, p3],
         algorithm="priority",
@@ -84,12 +84,12 @@ def test_priority_aging_changes_order():
 
     check_timeline(results["timeline"], expectedTimeline)
 
-    # At time 12, P2 has waited 12 ms: priority 3 - 3 = 0.
+    # At time 12, P2 has waited 12 ms: priority max(1, 3 - 3) = 1.
     # P3 has waited 2 ms: priority 1 - 0 = 1.
-    # Aging makes P2 run before P3.
+    # Their effective priorities tie at 1; P2 wins by its earlier arrival.
 
     # Create fresh processes for the comparison run
-    p1 = Process("P1", 0, 12, priority=0)
+    p1 = Process("P1", 0, 12, priority=1)
     p2 = Process("P2", 0, 2, priority=3)
     p3 = Process("P3", 10, 1, priority=1)
 

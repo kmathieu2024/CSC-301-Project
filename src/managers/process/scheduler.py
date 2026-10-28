@@ -48,7 +48,7 @@ def validate_processes(processes: list[Process]) -> None:
             raise ValueError(f"Invalid arrival time for {p.pid}")
         if not isinstance(p.burst_time, (int, float)) or isinstance(p.burst_time, bool) or p.burst_time <= 0:
             raise ValueError(f"Invalid burst time for {p.pid}")
-        if not isinstance(p.priority, int) or isinstance(p.priority, bool) or p.priority < 0:
+        if not isinstance(p.priority, int) or isinstance(p.priority, bool) or p.priority < 1:
             raise ValueError(f"Invalid priority for {p.pid}")
 
 
@@ -135,7 +135,7 @@ class Scheduler:
         waited = self._ready_wait.get(p.pid, 0)
         if p.pid in self._ready_since:
             waited += current_time - self._ready_since[p.pid]
-        return max(0, p.priority - int(waited // self.aging_interval))
+        return max(1, p.priority - int(waited // self.aging_interval))
 
     def select_next(self,ready: list[Process],current_time: int | float,) -> SchedulingDecision:
         # makes a decision of the ready processes, which should run next 

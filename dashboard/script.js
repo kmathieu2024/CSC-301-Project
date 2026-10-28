@@ -82,9 +82,9 @@ processForm.addEventListener("submit", function (event) {
         return;
     }
 
-    if (!Number.isSafeInteger(priority) || priority < 0) {
+    if (!Number.isSafeInteger(priority) || priority < 1) {
         processError.textContent =
-            "Priority must be a whole number of 0 or greater.";
+            "Priority must be a whole number of 1 or greater.";
         return;
     }
 
@@ -237,11 +237,11 @@ processFileInput.addEventListener("change", async function () {
 
             // Match the Python model's default priority when omitted.
             const priority =
-                process.priority === undefined ? 0 : process.priority;
+                process.priority === undefined ? 1 : process.priority;
 
-            if (!Number.isSafeInteger(priority) || priority < 0) {
+            if (!Number.isSafeInteger(priority) || priority < 1) {
                 throw new Error(
-                    rowLabel + "priority must be a whole number of 0 or greater."
+                    rowLabel + "priority must be a whole number of 1 or greater."
                 );
             }
 
