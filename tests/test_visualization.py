@@ -1,7 +1,8 @@
+import json
 from threading import Thread
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Request, Response, expect
 from werkzeug.serving import make_server
 
 from app import app
@@ -324,3 +325,87 @@ def test_reset_clears_visualizations(page: Page, dashboard_url, reset_point):
     expect(page.locator("#process-metrics-body .state-badge")).to_have_text(
         ["RUNNING", "READY"]
     )
+
+
+@pytest.mark.parametrize("snapshot", ["partial", "completed", "reset"])
+def test_download_results_matches_displayed_snapshot(
+    page: Page, dashboard_url: str, snapshot: str
+) -> None:
+    """Export the displayed backend snapshot without advancing the simulation."""
+    prepare_simulation(page, dashboard_url)
+    export_button = page.locator("#export-results-button")
+    expect(export_button).to_be_disabled()
+
+    requests: list[str] = []
+    responses: list[Response] = []
+
+    def record_request(request: Request) -> None:
+        if "/api/" in request.url:
+            requests.append(request.url)
+
+    def record_response(response: Response) -> None:
+        if response.url.endswith(("/api/step", "/api/reset")):
+            responses.append(response)
+
+    page.on("request", record_request)
+    page.on("response", record_response)
+
+    try:
+        with page.expect_response("**/api/step"):
+            if snapshot == "completed":
+                run_to_completion(page)
+            else:
+                take_step(page)
+
+        if snapshot == "reset":
+            with page.expect_response("**/api/reset"):
+                page.locator("#reset-button").click()
+                page.wait_for_function("busy === false")
+
+        # Rendering and busy-state synchronization above ensure the last
+        # response is the snapshot displayed before the download.
+        response = responses[-1]
+        endpoint = "/api/reset" if snapshot == "reset" else "/api/step"
+        assert response.url.endswith(endpoint)
+        assert response.ok
+        expected = response.json()
+        completed = sum(
+            process["state"] == "TERMINATED"
+            for process in expected["processes"]
+        )
+        if snapshot == "completed":
+            assert completed == len(expected["processes"]) > 0
+        elif snapshot == "partial":
+            assert completed < len(expected["processes"])
+        else:
+            assert expected["current_time"] == 0
+
+        expected_throughput = (
+            completed / expected["current_time"]
+            if expected["current_time"] > 0 else 0
+        )
+        assert expected["throughput"] == pytest.approx(expected_throughput)
+
+        request_count = len(requests)
+        expect(export_button).to_be_enabled()
+
+        # Repeated exports must preserve the same snapshot and download name.
+        for _ in range(2):
+            with page.expect_download() as download_info:
+                export_button.click()
+
+            download = download_info.value
+            assert download.suggested_filename == "simulation-results.json"
+            with open(download.path(), encoding="utf-8") as exported_file:
+                exported = json.load(exported_file)
+            assert exported == expected
+            assert exported["throughput"] == pytest.approx(expected_throughput)
+
+        assert len(requests) == request_count
+        expect(page.locator("#result-current-time")).to_have_text(
+            str(expected["current_time"])
+        )
+        expect(page.locator("#simulation-error")).to_be_empty()
+    finally:
+        page.remove_listener("response", record_response)
+        page.remove_listener("request", record_request)

@@ -269,7 +269,7 @@ class SimulationEngine:
 
             # Return the RUNNING state before executing the process.
             yield self.results()
-            
+
             time_left = decision.max_run_time
 
             # run the selected process.
@@ -493,6 +493,12 @@ class SimulationEngine:
         for event in self.events:
             event_list.append(event.copy())
 
+        throughput = (
+            self.completed / self.current_time
+            if self.current_time > 0
+            else 0
+        )
+
         # Return the simulation results.
 
         return {
@@ -505,5 +511,6 @@ class SimulationEngine:
             "average_response_time": average_response,
             "cpu_utilization": utilization,
             "timeline": self.timeline,
-            "events": event_list
+            "events": event_list,
+            "throughput": throughput
         }
