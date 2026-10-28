@@ -86,7 +86,7 @@ def test_priority_aging_changes_order():
 
     # At time 12, P2 has waited 12 ms: priority max(1, 3 - 3) = 1.
     # P3 has waited 2 ms: priority 1 - 0 = 1.
-    # Aging makes P2 run before P3.
+    # Their effective priorities tie at 1; P2 wins by its earlier arrival.
 
     # Create fresh processes for the comparison run
     p1 = Process("P1", 0, 12, priority=1)
