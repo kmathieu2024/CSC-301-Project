@@ -70,3 +70,27 @@ baseline test cases, and project documentation.
    timeline, and event history returned by the simulator. Partial runs and reset
    snapshots can also be exported; averages are final only after completion.
    The button becomes available once simulation results have been displayed.
+
+### Memory simulation
+
+Pass a `MemoryManager` to `SimulationEngine` and provide each process with a
+`memory_references` dictionary mapping elapsed CPU time to virtual addresses:
+
+```python
+from src.core.process import Process
+from src.core.simulation import SimulationEngine
+from src.managers.memory import MemoryManager
+
+process = Process("P1", 0, 5, memory_references={0: 0, 1: 8, 3: 0})
+memory = MemoryManager(frame_count=3, page_size=4, algorithm="lru", fault_latency=2)
+results = SimulationEngine([process], memory_manager=memory).run()
+print(results["memory_metrics"])
+```
+
+Addresses are split into pages and offsets using `page_size`. Frames are shared
+across processes; FIFO and LRU select victims globally. Fault latency pauses
+CPU execution and advances simulated time, including arrivals during the delay.
+Memory is released when a process terminates. Memory events include the
+translation and any evicted `(pid, page)` pair. `memory.frames`,
+`memory.page_tables`, and `memory.metrics()` expose current state; reset clears
+memory and counters. Simulation reset also resets its memory manager.

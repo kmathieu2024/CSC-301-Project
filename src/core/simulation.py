@@ -11,7 +11,7 @@ class SimulationEngine:
 
     def __init__(self, processes, algorithm="fcfs", quantum=4,
                  aging_interval=4, context_switch=0,
-                 scenario_id="default", seed=0):
+                 scenario_id="default", seed=0, memory_manager=None):
 
         self.processes = list(processes)
         validate_processes(self.processes)
@@ -28,6 +28,15 @@ class SimulationEngine:
         self.context_switch = context_switch
         self.scenario_id = scenario_id
         self.seed = seed
+        self.memory_manager = memory_manager
+        for process in self.processes:
+            for offset, address in process.memory_references.items():
+                if (isinstance(offset, bool) or not isinstance(offset, int) or
+                        offset < 0 or offset >= process.burst_time or
+                        isinstance(address, bool) or not isinstance(address, int) or address < 0):
+                    raise ValueError("Invalid memory reference for process " + process.pid)
+        if memory_manager is None and any(p.memory_references for p in self.processes):
+            raise ValueError("Memory references require a memory manager")
 
         self.reset()
 
@@ -43,6 +52,9 @@ class SimulationEngine:
             aging_interval=self.aging_interval
         )
 
+        if self.memory_manager is not None:
+            self.memory_manager.reset()
+        self._memory_done = set()
         self.random = random.Random(self.seed)
 
         self.current_time = 0
@@ -276,7 +288,31 @@ class SimulationEngine:
 
             while process.remaining_time > 0:
 
+                executed = process.burst_time - process.remaining_time
+                reference_key = (process.pid, executed)
+                if (self.memory_manager is not None and
+                        executed in process.memory_references and reference_key not in self._memory_done):
+                    result = self.memory_manager.reference(process, process.memory_references[executed])
+                    self._memory_done.add(reference_key)
+                    self.events.append({
+                        "timestamp": self.current_time, "manager": "memory",
+                        "event_type": "page_fault" if result.fault else "page_hit",
+                        "entity_id": process.pid, "action": "reference",
+                        "previous_state": process.state.value, "new_state": process.state.value,
+                        "outcome": "success", "duration": result.latency,
+                        "message": "", "scenario_id": self.scenario_id,
+                        "address": result.address, "page": result.page, "frame": result.frame,
+                        "physical_address": result.physical_address, "evicted": result.evicted,
+                    })
+                    if result.latency:
+                        start = self.current_time
+                        self.advance_time(result.latency)
+                        self.timeline.append({"pid": "IDLE", "start": start, "end": self.current_time})
+
                 duration = process.remaining_time
+                future_references = [offset for offset in process.memory_references if offset > executed]
+                if future_references:
+                    duration = min(duration, min(future_references) - executed)
 
                 if time_left is not None:
                     duration = min(duration, time_left)
@@ -367,6 +403,8 @@ class SimulationEngine:
                     process.turnaround_time - process.burst_time
                 )
 
+                if self.memory_manager is not None:
+                    self.memory_manager.release(process)
                 self.completed += 1
 
                 self.log(
@@ -502,6 +540,7 @@ class SimulationEngine:
         # Return the simulation results.
 
         return {
+            "memory_metrics": self.memory_manager.metrics() if self.memory_manager is not None else None,
             "algorithm": self.algorithm,
             "current_time": self.current_time,
             "seed": self.seed,

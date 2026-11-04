@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -21,6 +21,9 @@ class Process:
     arrival_time: int
     burst_time: int
     priority: int = 1
+
+    # Mapping from CPU time already executed to a virtual address.
+    memory_references: dict[int, int] = field(default_factory=dict)
 
     # Simulation state
     remaining_time: int = 0
