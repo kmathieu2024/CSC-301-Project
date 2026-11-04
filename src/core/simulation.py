@@ -1,5 +1,6 @@
 
 import random
+import math
 
 from src.core.process import ProcessState
 from src.managers.process.scheduler import Scheduler, validate_processes
@@ -21,6 +22,14 @@ class SimulationEngine:
 
         if context_switch < 0:
             raise ValueError("Context-switch time cannot be negative")
+
+        for process in self.processes:
+            for offset, duration in process.blocking_requests.items():
+                if (isinstance(offset, bool) or not isinstance(offset, (int, float))
+                        or not math.isfinite(offset) or not 0 <= offset < process.burst_time
+                        or isinstance(duration, bool) or not isinstance(duration, (int, float))
+                        or not math.isfinite(duration) or duration <= 0):
+                    raise ValueError("Invalid blocking request for process " + process.pid)
 
         self.algorithm = algorithm.lower()
         self.quantum = quantum
@@ -55,6 +64,7 @@ class SimulationEngine:
         if self.memory_manager is not None:
             self.memory_manager.reset()
         self._memory_done = set()
+        self._memory_pending = set()
         self.random = random.Random(self.seed)
 
         self.current_time = 0
@@ -65,6 +75,7 @@ class SimulationEngine:
         self.last_pid = None
         self.next_event_id = 0
         self._runner = None
+        self._blocks_done = set()
 
         # Add aarrivals to the event queue.
 
@@ -77,12 +88,12 @@ class SimulationEngine:
 
     def schedule_event(self, time, event_type, process):
         # Store upcoming events in chronological order.
-        # Only process arrivals are supported.
+        # Arrival and unblock events share the same queue.
 
         if time < self.current_time:
             raise ValueError("Cannot schedule an event in the past")
 
-        if event_type != "arrival":
+        if event_type not in ("arrival", "unblock"):
             raise ValueError("Unsupported event type: " + event_type)
 
         # Events are sorted by time, PID, and insertion order.
@@ -126,8 +137,9 @@ class SimulationEngine:
 
             time, pid, number, event_type, process = self.event_queue.pop(0)
 
-            if process.state != ProcessState.NEW:
-                raise ValueError("Process already arrived: " + process.pid)
+            expected = ProcessState.NEW if event_type == "arrival" else ProcessState.WAITING
+            if process.state != expected:
+                raise ValueError("Unexpected state for " + event_type + ": " + process.pid)
 
             old_state = process.state
 
@@ -137,10 +149,17 @@ class SimulationEngine:
 
             self.log(
                 process,
-                "arrival",
-                "admit",
+                event_type,
+                "admit" if event_type == "arrival" else "unblock",
                 old_state
             )
+
+    def _block_process(self, process, duration):
+        process.blocked_time += duration
+        old_state = process.state
+        process.state = ProcessState.WAITING
+        self.schedule_event(self.current_time + duration, "unblock", process)
+        self.log(process, "block", "wait", old_state, duration)
 
     def ready_processes(self):
         # Find all processes that are ready.
@@ -289,30 +308,45 @@ class SimulationEngine:
             while process.remaining_time > 0:
 
                 executed = process.burst_time - process.remaining_time
-                reference_key = (process.pid, executed)
+                key = (process.pid, executed)
+                if executed in process.blocking_requests and key not in self._blocks_done:
+                    duration = process.blocking_requests[executed]
+                    self._blocks_done.add(key)
+                    self._block_process(process, duration)
+                    break
+
                 if (self.memory_manager is not None and
-                        executed in process.memory_references and reference_key not in self._memory_done):
-                    result = self.memory_manager.reference(process, process.memory_references[executed])
-                    self._memory_done.add(reference_key)
-                    self.events.append({
-                        "timestamp": self.current_time, "manager": "memory",
-                        "event_type": "page_fault" if result.fault else "page_hit",
-                        "entity_id": process.pid, "action": "reference",
-                        "previous_state": process.state.value, "new_state": process.state.value,
-                        "outcome": "success", "duration": result.latency,
-                        "message": "", "scenario_id": self.scenario_id,
-                        "address": result.address, "page": result.page, "frame": result.frame,
-                        "physical_address": result.physical_address, "evicted": result.evicted,
-                    })
-                    if result.latency:
-                        start = self.current_time
-                        self.advance_time(result.latency)
-                        self.timeline.append({"pid": "IDLE", "start": start, "end": self.current_time})
+                        executed in process.memory_references and key not in self._memory_done):
+                    address = process.memory_references[executed]
+                    page = address // self.memory_manager.page_size
+                    if key in self._memory_pending and page in self.memory_manager.page_tables.get(process.pid, {}):
+                        self._memory_pending.remove(key)
+                        self._memory_done.add(key)
+                    else:
+                        result = self.memory_manager.reference(process, address)
+                        self.events.append({
+                            "timestamp": self.current_time, "manager": "memory",
+                            "event_type": "page_fault" if result.fault else "page_hit",
+                            "entity_id": process.pid, "action": "reference",
+                            "previous_state": process.state.value, "new_state": process.state.value,
+                            "outcome": "success", "duration": result.latency,
+                            "message": "", "scenario_id": self.scenario_id,
+                            "address": result.address, "page": result.page, "frame": result.frame,
+                            "physical_address": result.physical_address, "evicted": result.evicted,
+                        })
+                        if result.latency:
+                            self._memory_pending.add(key)
+                            self._block_process(process, result.latency)
+                            break
+                        self._memory_pending.discard(key)
+                        self._memory_done.add(key)
 
                 duration = process.remaining_time
-                future_references = [offset for offset in process.memory_references if offset > executed]
-                if future_references:
-                    duration = min(duration, min(future_references) - executed)
+                future_offsets = [offset for offset in process.blocking_requests if offset > executed]
+                future_offsets += [offset for offset in process.memory_references if offset > executed]
+                if future_offsets:
+                    duration = min(duration, min(future_offsets) - executed)
+
 
                 if time_left is not None:
                     duration = min(duration, time_left)
@@ -389,7 +423,9 @@ class SimulationEngine:
 
             # Check if process has completed.
 
-            if process.remaining_time == 0:
+            if process.state == ProcessState.WAITING:
+                pass
+            elif process.remaining_time == 0:
 
                 process.state = ProcessState.TERMINATED
 
@@ -400,7 +436,7 @@ class SimulationEngine:
                 )
 
                 process.waiting_time = (
-                    process.turnaround_time - process.burst_time
+                    process.turnaround_time - process.burst_time - process.blocked_time
                 )
 
                 if self.memory_manager is not None:
@@ -468,6 +504,20 @@ class SimulationEngine:
                     item["end"] - item["start"]
                 )
 
+        context_switch_overhead = sum(
+            item["end"] - item["start"]
+            for item in self.timeline if item["pid"] == "CS"
+        )
+        dispatch_counts = {process.pid: 0 for process in self.processes}
+        preemption_counts = {process.pid: 0 for process in self.processes}
+        for event in self.events:
+            if event["manager"] != "process":
+                continue
+            if event["event_type"] == "dispatch":
+                dispatch_counts[event["entity_id"]] += 1
+            elif event["event_type"] == "preemption":
+                preemption_counts[event["entity_id"]] += 1
+
         process_results = []
 
         total_wait = 0
@@ -487,6 +537,9 @@ class SimulationEngine:
                 "start_time": process.start_time,
                 "completion_time": process.completion_time,
                 "waiting_time": process.waiting_time,
+                "blocked_time": process.blocked_time,
+                "dispatch_count": dispatch_counts[process.pid],
+                "preemption_count": preemption_counts[process.pid],
                 "turnaround_time": process.turnaround_time,
                 "response_time": process.response_time
             })
@@ -549,6 +602,7 @@ class SimulationEngine:
             "average_turnaround_time": average_turnaround,
             "average_response_time": average_response,
             "cpu_utilization": utilization,
+            "context_switch_overhead": context_switch_overhead,
             "timeline": self.timeline,
             "events": event_list,
             "throughput": throughput

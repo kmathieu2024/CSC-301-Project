@@ -229,6 +229,11 @@
                     </div>
 
                     <div class="metric">
+                        <h3>Context-switch overhead</h3>
+                        <p id="result-context-switch-overhead">0</p>
+                    </div>
+
+                    <div class="metric">
                         <h3>Throughput</h3>
                         <p id="result-throughput">—</p>
                     </div>
@@ -273,11 +278,13 @@
                                 <th scope="col">Waiting</th>
                                 <th scope="col">Turnaround</th>
                                 <th scope="col">Response</th>
+                                <th scope="col">Dispatches</th>
+                                <th scope="col">Preemptions</th>
                             </tr>
                         </thead>
                         <tbody id="process-metrics-body">
                             <tr>
-                                <td colspan="9">Start a simulation to view process metrics.</td>
+                                <td colspan="11">Start a simulation to view process metrics.</td>
                             </tr>
                         </tbody>
                     </table>

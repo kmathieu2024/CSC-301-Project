@@ -24,6 +24,8 @@ class Process:
 
     # Mapping from CPU time already executed to a virtual address.
     memory_references: dict[int, int] = field(default_factory=dict)
+    # CPU-time offsets mapped to durations spent blocked.
+    blocking_requests: dict[int, float] = field(default_factory=dict)
 
     # Simulation state
     remaining_time: int = 0
@@ -33,6 +35,7 @@ class Process:
     start_time: int | None = None
     completion_time: int | None = None
     waiting_time: int = 0
+    blocked_time: float = 0
     turnaround_time: int = 0
     response_time: int | None = None
 
@@ -49,5 +52,6 @@ class Process:
         self.completion_time = None
 
         self.waiting_time = 0
+        self.blocked_time = 0
         self.turnaround_time = 0
         self.response_time = None

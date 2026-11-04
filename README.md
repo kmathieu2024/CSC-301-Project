@@ -88,9 +88,24 @@ print(results["memory_metrics"])
 ```
 
 Addresses are split into pages and offsets using `page_size`. Frames are shared
-across processes; FIFO and LRU select victims globally. Fault latency pauses
-CPU execution and advances simulated time, including arrivals during the delay.
+across processes; FIFO and LRU select victims globally. A fault with latency
+blocks the requesting process while other ready processes can run.
 Memory is released when a process terminates. Memory events include the
 translation and any evicted `(pid, page)` pair. `memory.frames`,
 `memory.page_tables`, and `memory.metrics()` expose current state; reset clears
 memory and counters. Simulation reset also resets its memory manager.
+### Simulating a blocked process
+
+`blocking_requests` maps elapsed CPU time to a positive blocking duration. For
+example, `Process("P1", 0, 3, blocking_requests={1: 3})` runs for one CPU
+time unit, waits for three simulated time units, then becomes ready again.
+Other ready processes can run during that wait. Blocked time is reported
+separately from time waiting in the ready queue. Reset clears the results so
+the same requests can be simulated again. Page faults with nonzero latency use
+the same waiting and ready transitions.
+
+Simulation results include a `dispatch_count` and `preemption_count` for each
+process. Dispatches count each time a process starts or resumes execution;
+preemptions count times it is returned to the ready queue before completion,
+such as an expired Round Robin quantum. Blocking is tracked separately.
+`context_switch_overhead` is the total time spent in context switches.
