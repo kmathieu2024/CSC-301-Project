@@ -458,6 +458,20 @@ class SimulationEngine:
                     item["end"] - item["start"]
                 )
 
+        context_switch_overhead = sum(
+            item["end"] - item["start"]
+            for item in self.timeline if item["pid"] == "CS"
+        )
+        dispatch_counts = {process.pid: 0 for process in self.processes}
+        preemption_counts = {process.pid: 0 for process in self.processes}
+        for event in self.events:
+            if event["manager"] != "process":
+                continue
+            if event["event_type"] == "dispatch":
+                dispatch_counts[event["entity_id"]] += 1
+            elif event["event_type"] == "preemption":
+                preemption_counts[event["entity_id"]] += 1
+
         process_results = []
 
         total_wait = 0
@@ -478,6 +492,8 @@ class SimulationEngine:
                 "completion_time": process.completion_time,
                 "waiting_time": process.waiting_time,
                 "blocked_time": process.blocked_time,
+                "dispatch_count": dispatch_counts[process.pid],
+                "preemption_count": preemption_counts[process.pid],
                 "turnaround_time": process.turnaround_time,
                 "response_time": process.response_time
             })
@@ -539,6 +555,7 @@ class SimulationEngine:
             "average_turnaround_time": average_turnaround,
             "average_response_time": average_response,
             "cpu_utilization": utilization,
+            "context_switch_overhead": context_switch_overhead,
             "timeline": self.timeline,
             "events": event_list,
             "throughput": throughput

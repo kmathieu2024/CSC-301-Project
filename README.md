@@ -81,3 +81,9 @@ separately from time waiting in the ready queue. Reset clears the results so
 the same requests can be simulated again. This mechanism is independent of
 the memory manager; page faults must be connected to it when that branch is
 integrated.
+
+Simulation results include a `dispatch_count` and `preemption_count` for each
+process. Dispatches count each time a process starts or resumes execution;
+preemptions count times it is returned to the ready queue before completion,
+such as an expired Round Robin quantum. Blocking is tracked separately.
+`context_switch_overhead` is the total time spent in context switches.

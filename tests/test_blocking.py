@@ -20,3 +20,18 @@ def test_cpu_idles_until_blocked_process_is_ready():
     result = SimulationEngine([process]).run()
     assert result["timeline"][0] == {"pid": "IDLE", "start": 0, "end": 2}
     assert process.completion_time == 4
+
+
+def test_scheduling_counts_and_context_switch_overhead():
+    first = Process("P1", 0, 3)
+    second = Process("P2", 0, 2)
+    engine = SimulationEngine([first, second], algorithm="rr", quantum=1, context_switch=0.5)
+    result = engine.run()
+    processes = {process["pid"]: process for process in result["processes"]}
+    assert (processes["P1"]["dispatch_count"], processes["P1"]["preemption_count"]) == (3, 2)
+    assert (processes["P2"]["dispatch_count"], processes["P2"]["preemption_count"]) == (2, 1)
+    assert result["context_switch_overhead"] == 2
+    engine.reset()
+    reset = engine.results()
+    assert reset["context_switch_overhead"] == 0
+    assert all(p["dispatch_count"] == p["preemption_count"] == 0 for p in reset["processes"])
