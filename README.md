@@ -71,6 +71,29 @@ baseline test cases, and project documentation.
    snapshots can also be exported; averages are final only after completion.
    The button becomes available once simulation results have been displayed.
 
+### Memory simulation
+
+Pass a `MemoryManager` to `SimulationEngine` and provide each process with a
+`memory_references` dictionary mapping elapsed CPU time to virtual addresses:
+
+```python
+from src.core.process import Process
+from src.core.simulation import SimulationEngine
+from src.managers.memory import MemoryManager
+
+process = Process("P1", 0, 5, memory_references={0: 0, 1: 8, 3: 0})
+memory = MemoryManager(frame_count=3, page_size=4, algorithm="lru", fault_latency=2)
+results = SimulationEngine([process], memory_manager=memory).run()
+print(results["memory_metrics"])
+```
+
+Addresses are split into pages and offsets using `page_size`. Frames are shared
+across processes; FIFO and LRU select victims globally. A fault with latency
+blocks the requesting process while other ready processes can run.
+Memory is released when a process terminates. Memory events include the
+translation and any evicted `(pid, page)` pair. `memory.frames`,
+`memory.page_tables`, and `memory.metrics()` expose current state; reset clears
+memory and counters. Simulation reset also resets its memory manager.
 ### Simulating a blocked process
 
 `blocking_requests` maps elapsed CPU time to a positive blocking duration. For
@@ -78,12 +101,21 @@ example, `Process("P1", 0, 3, blocking_requests={1: 3})` runs for one CPU
 time unit, waits for three simulated time units, then becomes ready again.
 Other ready processes can run during that wait. Blocked time is reported
 separately from time waiting in the ready queue. Reset clears the results so
-the same requests can be simulated again. This mechanism is independent of
-the memory manager; page faults must be connected to it when that branch is
-integrated.
+the same requests can be simulated again. Page faults with nonzero latency use
+the same waiting and ready transitions.
 
 Simulation results include a `dispatch_count` and `preemption_count` for each
 process. Dispatches count each time a process starts or resumes execution;
 preemptions count times it is returned to the ready queue before completion,
 such as an expired Round Robin quantum. Blocking is tracked separately.
 `context_switch_overhead` is the total time spent in context switches.
+
+A page loaded for a fault with nonzero latency is temporarily protected from
+FIFO or LRU eviction until the requesting process resumes and uses it. If all
+frames are protected, another process requesting a missing page waits for a
+frame instead of replacing one. When protection ends, a waiting process is
+made ready to retry. Time spent waiting for a frame counts as blocked time;
+the page fault is counted when a frame can be assigned. This prevents the
+simulator from repeatedly replacing pages before their owners can use them.
+This is a simplified simulation of memory pressure, not a complete model of
+an operating system's page reclaim or disk I/O.

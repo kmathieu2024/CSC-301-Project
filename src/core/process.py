@@ -22,6 +22,8 @@ class Process:
     burst_time: int
     priority: int = 1
 
+    # Mapping from CPU time already executed to a virtual address.
+    memory_references: dict[int, int] = field(default_factory=dict)
     # CPU-time offsets mapped to durations spent blocked.
     blocking_requests: dict[int, float] = field(default_factory=dict)
 

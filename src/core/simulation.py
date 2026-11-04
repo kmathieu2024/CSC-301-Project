@@ -3,6 +3,7 @@ import random
 import math
 
 from src.core.process import ProcessState
+from src.managers.memory.memory_manager import NoFrameAvailable
 from src.managers.process.scheduler import Scheduler, validate_processes
 
 
@@ -12,7 +13,7 @@ class SimulationEngine:
 
     def __init__(self, processes, algorithm="fcfs", quantum=4,
                  aging_interval=4, context_switch=0,
-                 scenario_id="default", seed=0):
+                 scenario_id="default", seed=0, memory_manager=None):
 
         self.processes = list(processes)
         validate_processes(self.processes)
@@ -37,6 +38,15 @@ class SimulationEngine:
         self.context_switch = context_switch
         self.scenario_id = scenario_id
         self.seed = seed
+        self.memory_manager = memory_manager
+        for process in self.processes:
+            for offset, address in process.memory_references.items():
+                if (isinstance(offset, bool) or not isinstance(offset, int) or
+                        offset < 0 or offset >= process.burst_time or
+                        isinstance(address, bool) or not isinstance(address, int) or address < 0):
+                    raise ValueError("Invalid memory reference for process " + process.pid)
+        if memory_manager is None and any(p.memory_references for p in self.processes):
+            raise ValueError("Memory references require a memory manager")
 
         self.reset()
 
@@ -52,6 +62,11 @@ class SimulationEngine:
             aging_interval=self.aging_interval
         )
 
+        if self.memory_manager is not None:
+            self.memory_manager.reset()
+        self._memory_done = set()
+        self._memory_pending = set()
+        self._frame_waiters = []
         self.random = random.Random(self.seed)
 
         self.current_time = 0
@@ -140,6 +155,29 @@ class SimulationEngine:
                 "admit" if event_type == "arrival" else "unblock",
                 old_state
             )
+
+    def _block_process(self, process, duration):
+        process.blocked_time += duration
+        old_state = process.state
+        process.state = ProcessState.WAITING
+        self.schedule_event(self.current_time + duration, "unblock", process)
+        self.log(process, "block", "wait", old_state, duration)
+
+    def _wait_for_frame(self, process):
+        old_state = process.state
+        process.state = ProcessState.WAITING
+        self._frame_waiters.append((process, self.current_time))
+        self.log(process, "block", "wait_for_frame", old_state)
+
+    def _wake_frame_waiter(self):
+        if not self._frame_waiters:
+            return
+        process, started = self._frame_waiters.pop(0)
+        process.blocked_time += self.current_time - started
+        old_state = process.state
+        process.state = ProcessState.READY
+        self.scheduler.on_ready(process, self.current_time)
+        self.log(process, "unblock", "frame_available", old_state)
 
     def ready_processes(self):
         # Find all processes that are ready.
@@ -292,17 +330,48 @@ class SimulationEngine:
                 if executed in process.blocking_requests and key not in self._blocks_done:
                     duration = process.blocking_requests[executed]
                     self._blocks_done.add(key)
-                    process.blocked_time += duration
-                    old_state = process.state
-                    process.state = ProcessState.WAITING
-                    self.schedule_event(self.current_time + duration, "unblock", process)
-                    self.log(process, "block", "wait", old_state, duration)
+                    self._block_process(process, duration)
                     break
 
+                if (self.memory_manager is not None and
+                        executed in process.memory_references and key not in self._memory_done):
+                    address = process.memory_references[executed]
+                    page = address // self.memory_manager.page_size
+                    if key in self._memory_pending and page in self.memory_manager.page_tables.get(process.pid, {}):
+                        self._memory_pending.remove(key)
+                        self.memory_manager.unprotect(process, page)
+                        self._memory_done.add(key)
+                        self._wake_frame_waiter()
+                    else:
+                        try:
+                            result = self.memory_manager.reference(process, address)
+                        except NoFrameAvailable:
+                            self._wait_for_frame(process)
+                            break
+                        self.events.append({
+                            "timestamp": self.current_time, "manager": "memory",
+                            "event_type": "page_fault" if result.fault else "page_hit",
+                            "entity_id": process.pid, "action": "reference",
+                            "previous_state": process.state.value, "new_state": process.state.value,
+                            "outcome": "success", "duration": result.latency,
+                            "message": "", "scenario_id": self.scenario_id,
+                            "address": result.address, "page": result.page, "frame": result.frame,
+                            "physical_address": result.physical_address, "evicted": result.evicted,
+                        })
+                        if result.latency:
+                            self.memory_manager.protect(process, page)
+                            self._memory_pending.add(key)
+                            self._block_process(process, result.latency)
+                            break
+                        self._memory_pending.discard(key)
+                        self._memory_done.add(key)
+
                 duration = process.remaining_time
-                future_blocks = [offset for offset in process.blocking_requests if offset > executed]
-                if future_blocks:
-                    duration = min(duration, min(future_blocks) - executed)
+                future_offsets = [offset for offset in process.blocking_requests if offset > executed]
+                future_offsets += [offset for offset in process.memory_references if offset > executed]
+                if future_offsets:
+                    duration = min(duration, min(future_offsets) - executed)
+
 
                 if time_left is not None:
                     duration = min(duration, time_left)
@@ -395,6 +464,8 @@ class SimulationEngine:
                     process.turnaround_time - process.burst_time - process.blocked_time
                 )
 
+                if self.memory_manager is not None:
+                    self.memory_manager.release(process)
                 self.completed += 1
 
                 self.log(
@@ -547,6 +618,7 @@ class SimulationEngine:
         # Return the simulation results.
 
         return {
+            "memory_metrics": self.memory_manager.metrics() if self.memory_manager is not None else None,
             "algorithm": self.algorithm,
             "current_time": self.current_time,
             "seed": self.seed,
