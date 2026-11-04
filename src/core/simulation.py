@@ -1,5 +1,6 @@
 
 import random
+import math
 
 from src.core.process import ProcessState
 from src.managers.process.scheduler import Scheduler, validate_processes
@@ -21,6 +22,14 @@ class SimulationEngine:
 
         if context_switch < 0:
             raise ValueError("Context-switch time cannot be negative")
+
+        for process in self.processes:
+            for offset, duration in process.blocking_requests.items():
+                if (isinstance(offset, bool) or not isinstance(offset, (int, float))
+                        or not math.isfinite(offset) or not 0 <= offset < process.burst_time
+                        or isinstance(duration, bool) or not isinstance(duration, (int, float))
+                        or not math.isfinite(duration) or duration <= 0):
+                    raise ValueError("Invalid blocking request for process " + process.pid)
 
         self.algorithm = algorithm.lower()
         self.quantum = quantum
@@ -53,6 +62,7 @@ class SimulationEngine:
         self.last_pid = None
         self.next_event_id = 0
         self._runner = None
+        self._blocks_done = set()
 
         # Add aarrivals to the event queue.
 
@@ -65,12 +75,12 @@ class SimulationEngine:
 
     def schedule_event(self, time, event_type, process):
         # Store upcoming events in chronological order.
-        # Only process arrivals are supported.
+        # Arrival and unblock events share the same queue.
 
         if time < self.current_time:
             raise ValueError("Cannot schedule an event in the past")
 
-        if event_type != "arrival":
+        if event_type not in ("arrival", "unblock"):
             raise ValueError("Unsupported event type: " + event_type)
 
         # Events are sorted by time, PID, and insertion order.
@@ -114,8 +124,9 @@ class SimulationEngine:
 
             time, pid, number, event_type, process = self.event_queue.pop(0)
 
-            if process.state != ProcessState.NEW:
-                raise ValueError("Process already arrived: " + process.pid)
+            expected = ProcessState.NEW if event_type == "arrival" else ProcessState.WAITING
+            if process.state != expected:
+                raise ValueError("Unexpected state for " + event_type + ": " + process.pid)
 
             old_state = process.state
 
@@ -125,8 +136,8 @@ class SimulationEngine:
 
             self.log(
                 process,
-                "arrival",
-                "admit",
+                event_type,
+                "admit" if event_type == "arrival" else "unblock",
                 old_state
             )
 
@@ -276,7 +287,22 @@ class SimulationEngine:
 
             while process.remaining_time > 0:
 
+                executed = process.burst_time - process.remaining_time
+                key = (process.pid, executed)
+                if executed in process.blocking_requests and key not in self._blocks_done:
+                    duration = process.blocking_requests[executed]
+                    self._blocks_done.add(key)
+                    process.blocked_time += duration
+                    old_state = process.state
+                    process.state = ProcessState.WAITING
+                    self.schedule_event(self.current_time + duration, "unblock", process)
+                    self.log(process, "block", "wait", old_state, duration)
+                    break
+
                 duration = process.remaining_time
+                future_blocks = [offset for offset in process.blocking_requests if offset > executed]
+                if future_blocks:
+                    duration = min(duration, min(future_blocks) - executed)
 
                 if time_left is not None:
                     duration = min(duration, time_left)
@@ -353,7 +379,9 @@ class SimulationEngine:
 
             # Check if process has completed.
 
-            if process.remaining_time == 0:
+            if process.state == ProcessState.WAITING:
+                pass
+            elif process.remaining_time == 0:
 
                 process.state = ProcessState.TERMINATED
 
@@ -364,7 +392,7 @@ class SimulationEngine:
                 )
 
                 process.waiting_time = (
-                    process.turnaround_time - process.burst_time
+                    process.turnaround_time - process.burst_time - process.blocked_time
                 )
 
                 self.completed += 1
@@ -449,6 +477,7 @@ class SimulationEngine:
                 "start_time": process.start_time,
                 "completion_time": process.completion_time,
                 "waiting_time": process.waiting_time,
+                "blocked_time": process.blocked_time,
                 "turnaround_time": process.turnaround_time,
                 "response_time": process.response_time
             })
