@@ -278,41 +278,88 @@ class FileManager:
             node.metadata.size, node.metadata.permissions,
         )
 
+    
     def execute_command(self, command: str, *, user: object = None):
-        """Execute CREATE, WRITE, READ, DELETE, MKDIR, RMDIR, LS, CD, PWD, STAT."""
-        if not isinstance(command, str) or not command.strip():
-            raise ValueError("command must be a non-empty string")
-        parts = shlex.split(command)
-        operation = parts[0].upper()
-        args = parts[1:]
-        if operation == "WRITE":
-            if len(parts) < 3:
-                raise ValueError("WRITE requires a path and content")
+        """Execute file-system commands and return user-friendly error messages."""
+        try:
+            if not isinstance(command, str) or not command.strip():
+                raise ValueError("Command must be a non-empty string.")
 
-            path = parts[1]
-            content = " ".join(parts[2:])
+            parts = shlex.split(command)
 
-            self.write_file(path, content, user=user)
-            return ""
-        if operation == "CREATE" and len(args) == 1:
-            return self.create_file(args[0], user=user)
-        if operation == "READ" and len(args) == 1:
-            return self.read_file(args[0], user=user)
-        if operation == "DELETE" and len(args) == 1:
-            return self.delete_file(args[0], user=user)
-        if operation == "MKDIR" and len(args) == 1:
-            return self.make_directory(args[0], user=user)
-        if operation == "RMDIR" and len(args) == 1:
-            return self.remove_directory(args[0], user=user)
-        if operation == "LS" and len(args) <= 1:
-            return self.list_directory(args[0] if args else ".", user=user)
-        if operation == "CD" and len(args) == 1:
-            return self.change_directory(args[0], user=user)
-        if operation == "PWD" and not args:
-            return self.present_working_directory()
-        if operation == "STAT" and len(args) == 1:
-            return self.get_metadata(args[0], user=user)
-        raise ValueError(f"Invalid command or arguments: {command}")
+            if not parts:
+                raise ValueError("Command must be a non-empty string.")
+
+            operation = parts[0].upper()
+            args = parts[1:]
+
+            if operation == "WRITE":
+                if len(args) < 2:
+                    raise ValueError("WRITE requires a path and content.")
+
+                path = args[0]
+                content = " ".join(args[1:])
+
+                self.write_file(path, content, user=user)
+                return ""
+
+            if operation == "CREATE" and len(args) == 1:
+                return self.create_file(args[0], user=user)
+
+            if operation == "READ" and len(args) == 1:
+                return self.read_file(args[0], user=user)
+
+            if operation == "DELETE" and len(args) == 1:
+                return self.delete_file(args[0], user=user)
+
+            if operation == "MKDIR" and len(args) == 1:
+                return self.make_directory(args[0], user=user)
+
+            if operation == "RMDIR" and len(args) == 1:
+                return self.remove_directory(args[0], user=user)
+
+            if operation == "LS" and len(args) <= 1:
+                return self.list_directory(
+                    args[0] if args else ".", user=user
+                )
+
+            if operation == "CD" and len(args) == 1:
+                return self.change_directory(args[0], user=user)
+
+            if operation == "PWD" and not args:
+                return self.present_working_directory()
+
+            if operation == "STAT" and len(args) == 1:
+                return self.get_metadata(args[0], user=user)
+
+            raise ValueError(
+                f"Invalid command or arguments: {command}"
+            )
+
+        except FileNotFoundError as error:
+            return f"Error: File or directory not found: {error}"
+
+        except FileAlreadyExistsError as error:
+            return f"Error: File or directory already exists: {error}"
+
+        except NotADirectoryError as error:
+            return f"Error: Not a directory: {error}"
+
+        except IsADirectoryError as error:
+            return f"Error: Is a directory: {error}"
+
+        except DirectoryNotEmptyError as error:
+            return f"Error: Directory is not empty: {error}"
+
+        except AuthorizationError:
+            return "Error: You are not authorized to perform this operation."
+
+        except FileSystemError as error:
+            return f"Error: File system operation failed: {error}"
+
+        except ValueError as error:
+            return f"Error: Invalid command: {error}"
+
 
 
 __all__ = [

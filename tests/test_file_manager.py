@@ -170,3 +170,59 @@ def test_authorization_denial_blocks_delete():
 
     with pytest.raises(AuthorizationError):
         fs.delete_file("a.txt")
+
+
+def test_command_displays_missing_file_error():
+    fs = FileManager()
+
+    result = fs.execute_command("READ missing.txt")
+
+    assert result.startswith("Error:")
+    assert "not found" in result.lower()
+
+
+def test_command_displays_duplicate_file_error():
+    fs = FileManager()
+    fs.execute_command("CREATE notes.txt")
+
+    result = fs.execute_command("CREATE notes.txt")
+
+    assert result.startswith("Error:")
+    assert "already exists" in result.lower()
+
+
+def test_command_displays_authorization_error():
+    fs = FileManager(authorizer=DenyWrites())
+    fs.execute_command("CREATE notes.txt")
+
+    result = fs.execute_command("WRITE notes.txt blocked")
+
+    assert result.startswith("Error:")
+    assert "not authorized" in result.lower()
+
+
+def test_command_displays_invalid_command_error():
+    fs = FileManager()
+
+    result = fs.execute_command("INVALID")
+
+    assert result.startswith("Error:")
+    assert "invalid command" in result.lower()
+
+
+def test_command_displays_empty_command_error():
+    fs = FileManager()
+
+    result = fs.execute_command("")
+
+    assert result.startswith("Error:")
+    assert "non-empty" in result.lower()
+
+
+def test_command_displays_malformed_quotes_error():
+    fs = FileManager()
+
+    result = fs.execute_command('WRITE notes.txt "unfinished')
+
+    assert result.startswith("Error:")
+    assert "invalid command" in result.lower()
