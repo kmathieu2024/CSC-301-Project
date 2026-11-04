@@ -29,3 +29,22 @@ def test_fifo_and_lru_same_trace():
             memory.reference(process, address)
         assert memory.frames == expected
         assert (memory.hits, memory.faults, memory.evictions) == (1, 4, 1)
+
+
+def test_one_frame_protects_faulted_page_until_process_can_use_it():
+    processes = [Process("P1", 0, 1, memory_references={0: 0}),
+                 Process("P2", 0, 1, memory_references={0: 1})]
+    engine = SimulationEngine(processes, algorithm="rr", quantum=1,
+                              memory_manager=MemoryManager(1, fault_latency=2))
+    for _ in range(30):
+        if engine.completed == len(processes):
+            break
+        engine.step()
+    assert engine.completed == 2
+    assert engine.memory_manager.metrics()["faults"] == 2
+    assert engine.memory_manager.metrics()["evictions"] <= 1
+    assert any(e["action"] == "wait_for_frame" for e in engine.events)
+    assert all(p.blocked_time >= 2 for p in processes)
+    engine.reset()
+    assert engine._frame_waiters == []
+    assert not engine.memory_manager._protected

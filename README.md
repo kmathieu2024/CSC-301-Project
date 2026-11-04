@@ -109,3 +109,13 @@ process. Dispatches count each time a process starts or resumes execution;
 preemptions count times it is returned to the ready queue before completion,
 such as an expired Round Robin quantum. Blocking is tracked separately.
 `context_switch_overhead` is the total time spent in context switches.
+
+A page loaded for a fault with nonzero latency is temporarily protected from
+FIFO or LRU eviction until the requesting process resumes and uses it. If all
+frames are protected, another process requesting a missing page waits for a
+frame instead of replacing one. When protection ends, a waiting process is
+made ready to retry. Time spent waiting for a frame counts as blocked time;
+the page fault is counted when a frame can be assigned. This prevents the
+simulator from repeatedly replacing pages before their owners can use them.
+This is a simplified simulation of memory pressure, not a complete model of
+an operating system's page reclaim or disk I/O.

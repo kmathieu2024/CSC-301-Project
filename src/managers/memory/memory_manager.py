@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 
 
+class NoFrameAvailable(Exception):
+    """All frames are temporarily protected."""
+
+
 @dataclass(frozen=True)
 class Translation:
     pid: str
@@ -34,6 +38,7 @@ class MemoryManager:
         self.page_tables = {}
         self._loaded = {}
         self._used = {}
+        self._protected = set()
         self._clock = 0
         self.hits = self.faults = self.evictions = 0
 
@@ -44,6 +49,9 @@ class MemoryManager:
         page, offset = divmod(address, self.page_size)
         key = (pid, page)
         table = self.page_tables.setdefault(pid, {})
+        if page not in table and None not in self.frames and all(
+                frame in self._protected for frame in self.frames):
+            raise NoFrameAvailable()
         self._clock += 1
         evicted = None
         fault = page not in table
@@ -53,7 +61,7 @@ class MemoryManager:
                 frame = self.frames.index(None)
             else:
                 order = self._loaded if self.algorithm == "fifo" else self._used
-                evicted = min(order, key=order.get)
+                evicted = min((key for key in order if key not in self._protected), key=order.get)
                 frame = self.page_tables[evicted[0]].pop(evicted[1])
                 del self._loaded[evicted]
                 del self._used[evicted]
@@ -68,9 +76,19 @@ class MemoryManager:
         return Translation(pid, address, page, offset, frame, frame * self.page_size + offset,
                            fault, evicted, self.fault_latency if fault else 0)
 
+    def protect(self, process, page):
+        key = (process.pid, page)
+        if self.page_tables.get(process.pid, {}).get(page) is None:
+            raise ValueError("Cannot protect a page that is not resident")
+        self._protected.add(key)
+
+    def unprotect(self, process, page):
+        self._protected.remove((process.pid, page))
+
     def release(self, process):
         for page, frame in self.page_tables.pop(process.pid, {}).items():
             key = (process.pid, page)
+            self._protected.discard(key)
             self.frames[frame] = None
             del self._loaded[key]
             del self._used[key]

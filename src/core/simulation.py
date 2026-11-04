@@ -3,6 +3,7 @@ import random
 import math
 
 from src.core.process import ProcessState
+from src.managers.memory.memory_manager import NoFrameAvailable
 from src.managers.process.scheduler import Scheduler, validate_processes
 
 
@@ -65,6 +66,7 @@ class SimulationEngine:
             self.memory_manager.reset()
         self._memory_done = set()
         self._memory_pending = set()
+        self._frame_waiters = []
         self.random = random.Random(self.seed)
 
         self.current_time = 0
@@ -160,6 +162,22 @@ class SimulationEngine:
         process.state = ProcessState.WAITING
         self.schedule_event(self.current_time + duration, "unblock", process)
         self.log(process, "block", "wait", old_state, duration)
+
+    def _wait_for_frame(self, process):
+        old_state = process.state
+        process.state = ProcessState.WAITING
+        self._frame_waiters.append((process, self.current_time))
+        self.log(process, "block", "wait_for_frame", old_state)
+
+    def _wake_frame_waiter(self):
+        if not self._frame_waiters:
+            return
+        process, started = self._frame_waiters.pop(0)
+        process.blocked_time += self.current_time - started
+        old_state = process.state
+        process.state = ProcessState.READY
+        self.scheduler.on_ready(process, self.current_time)
+        self.log(process, "unblock", "frame_available", old_state)
 
     def ready_processes(self):
         # Find all processes that are ready.
@@ -321,9 +339,15 @@ class SimulationEngine:
                     page = address // self.memory_manager.page_size
                     if key in self._memory_pending and page in self.memory_manager.page_tables.get(process.pid, {}):
                         self._memory_pending.remove(key)
+                        self.memory_manager.unprotect(process, page)
                         self._memory_done.add(key)
+                        self._wake_frame_waiter()
                     else:
-                        result = self.memory_manager.reference(process, address)
+                        try:
+                            result = self.memory_manager.reference(process, address)
+                        except NoFrameAvailable:
+                            self._wait_for_frame(process)
+                            break
                         self.events.append({
                             "timestamp": self.current_time, "manager": "memory",
                             "event_type": "page_fault" if result.fault else "page_hit",
@@ -335,6 +359,7 @@ class SimulationEngine:
                             "physical_address": result.physical_address, "evicted": result.evicted,
                         })
                         if result.latency:
+                            self.memory_manager.protect(process, page)
                             self._memory_pending.add(key)
                             self._block_process(process, result.latency)
                             break
