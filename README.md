@@ -70,3 +70,20 @@ baseline test cases, and project documentation.
    timeline, and event history returned by the simulator. Partial runs and reset
    snapshots can also be exported; averages are final only after completion.
    The button becomes available once simulation results have been displayed.
+
+### Simulating a blocked process
+
+`blocking_requests` maps elapsed CPU time to a positive blocking duration. For
+example, `Process("P1", 0, 3, blocking_requests={1: 3})` runs for one CPU
+time unit, waits for three simulated time units, then becomes ready again.
+Other ready processes can run during that wait. Blocked time is reported
+separately from time waiting in the ready queue. Reset clears the results so
+the same requests can be simulated again. This mechanism is independent of
+the memory manager; page faults must be connected to it when that branch is
+integrated.
+
+Simulation results include a `dispatch_count` and `preemption_count` for each
+process. Dispatches count each time a process starts or resumes execution;
+preemptions count times it is returned to the ready queue before completion,
+such as an expired Round Robin quantum. Blocking is tracked separately.
+`context_switch_overhead` is the total time spent in context switches.

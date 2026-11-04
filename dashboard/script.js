@@ -390,6 +390,9 @@ function showResults(result) {
             ? result.cpu_utilization.toFixed(2) + "%"
             : "â€”";
 
+    document.getElementById("result-context-switch-overhead").textContent =
+        result.context_switch_overhead ?? "—";
+
     const throughput = result.current_time > 0
         ? completed / result.current_time
         : 0;
@@ -732,7 +735,9 @@ function renderProcessMetrics(result) {
             process.completion_time,
             completed ? process.waiting_time : null,
             completed ? process.turnaround_time : null,
-            process.response_time
+            process.response_time,
+            process.dispatch_count,
+            process.preemption_count
         ];
 
         values.forEach(function (value) {

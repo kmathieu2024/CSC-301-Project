@@ -84,10 +84,10 @@ def test_srtf_chart_shows_preemption(page: Page, dashboard_url):
     rows = page.locator("#process-metrics-body tr")
 
     expect(rows.nth(0).locator("td")).to_have_text(
-        ["P1", "TERMINATED", "0", "5", "0", "6", "1", "6", "0"]
+        ["P1", "TERMINATED", "0", "5", "0", "6", "1", "6", "0", "2", "1"]
     )
     expect(rows.nth(1).locator("td")).to_have_text(
-        ["P2", "TERMINATED", "1", "1", "1", "2", "0", "1", "0"]
+        ["P2", "TERMINATED", "1", "1", "1", "2", "0", "1", "0", "1", "0"]
     )
 
     expect(page.locator("#result-average-wait")).to_have_text("0.50")
@@ -173,8 +173,8 @@ def test_completed_visualizations(page: Page, dashboard_url, algorithm):
         intervals = ["0–2", "2–4", "4–5", "5–6"]
 
         expected_rows = [
-            ["P1", "TERMINATED", "2", "2", "2", "4", "0", "2", "0"],
-            ["P2", "TERMINATED", "2", "1", "5", "6", "3", "4", "3"],
+            ["P1", "TERMINATED", "2", "2", "2", "4", "0", "2", "0", "1", "0"],
+            ["P2", "TERMINATED", "2", "1", "5", "6", "3", "4", "3", "1", "0"],
         ]
 
     elif algorithm in ["SJF", "SRTF"]:
@@ -188,8 +188,8 @@ def test_completed_visualizations(page: Page, dashboard_url, algorithm):
         intervals = ["0–2", "2–3", "3–4", "4–6"]
 
         expected_rows = [
-            ["P1", "TERMINATED", "2", "2", "4", "6", "2", "4", "2"],
-            ["P2", "TERMINATED", "2", "1", "2", "3", "0", "1", "0"],
+            ["P1", "TERMINATED", "2", "2", "4", "6", "2", "4", "2", "1", "0"],
+            ["P2", "TERMINATED", "2", "1", "2", "3", "0", "1", "0", "1", "0"],
         ]
 
     else:  # Round Robin with quantum 1.
@@ -206,8 +206,8 @@ def test_completed_visualizations(page: Page, dashboard_url, algorithm):
         intervals = ["0–2", "2–3", "3–4", "4–5", "5–6", "6–7"]
 
         expected_rows = [
-            ["P1", "TERMINATED", "2", "2", "2", "7", "3", "5", "0"],
-            ["P2", "TERMINATED", "2", "1", "4", "5", "2", "3", "2"],
+            ["P1", "TERMINATED", "2", "2", "2", "7", "3", "5", "0", "2", "1"],
+            ["P2", "TERMINATED", "2", "1", "4", "5", "2", "3", "2", "1", "0"],
         ]
 
     expected_cards = {
@@ -217,6 +217,7 @@ def test_completed_visualizations(page: Page, dashboard_url, algorithm):
         "result-average-turnaround": expected_turnaround,
         "result-utilization": expected_utilization,
         "result-throughput": expected_throughput,
+        "result-context-switch-overhead": "2" if algorithm == "RR" else "1",
     }
 
     for element_id, value in expected_cards.items():
@@ -298,6 +299,7 @@ def test_reset_clears_visualizations(page: Page, dashboard_url, reset_point):
     page.wait_for_function("busy === false")
 
     expect(page.locator("#result-completed")).to_have_text("0 / 2")
+    expect(page.locator("#result-context-switch-overhead")).to_have_text("0")
     expect(page.locator("#gantt-chart .gantt-block")).to_have_count(0)
     expect(page.locator("#gantt-empty")).to_be_visible()
     expect(page.locator("#step-button")).to_be_enabled()
@@ -313,10 +315,10 @@ def test_reset_clears_visualizations(page: Page, dashboard_url, reset_point):
     rows = page.locator("#process-metrics-body tr")
 
     expect(rows.nth(0).locator("td")).to_have_text(
-        ["P1", "NEW", "2", "2", "—", "—", "—", "—", "—"]
+        ["P1", "NEW", "2", "2", "—", "—", "—", "—", "—", "0", "0"]
     )
     expect(rows.nth(1).locator("td")).to_have_text(
-        ["P2", "NEW", "2", "1", "—", "—", "—", "—", "—"]
+        ["P2", "NEW", "2", "1", "—", "—", "—", "—", "—", "0", "0"]
     )
 
     # Verify stepping works again after reset.
