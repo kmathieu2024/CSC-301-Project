@@ -226,3 +226,78 @@ def test_command_displays_malformed_quotes_error():
 
     assert result.startswith("Error:")
     assert "invalid command" in result.lower()
+
+def test_processes_have_independent_working_directories():
+    fs = FileManager()
+
+    fs.make_directory("/home")
+    fs.make_directory("/home/p1")
+    fs.make_directory("/home/p2")
+
+    fs.change_directory("/home/p1", process_id="P1")
+    fs.change_directory("/home/p2", process_id="P2")
+
+    assert fs.present_working_directory(process_id="P1") == "/home/p1"
+    assert fs.present_working_directory(process_id="P2") == "/home/p2"
+
+
+def test_process_relative_paths_use_own_working_directory():
+    fs = FileManager()
+
+    fs.make_directory("/home")
+    fs.make_directory("/home/p1")
+    fs.make_directory("/home/p2")
+
+    fs.create_file("/home/p1/notes.txt", "P1 file")
+    fs.create_file("/home/p2/notes.txt", "P2 file")
+
+    fs.change_directory("/home/p1", process_id="P1")
+    fs.change_directory("/home/p2", process_id="P2")
+
+    assert fs.read_file("notes.txt", process_id="P1") == "P1 file"
+    assert fs.read_file("notes.txt", process_id="P2") == "P2 file"
+
+
+def test_cd_for_one_process_does_not_change_another():
+    fs = FileManager()
+
+    fs.make_directory("/home")
+    fs.make_directory("/home/p1")
+    fs.make_directory("/home/p2")
+    fs.make_directory("/home/shared")
+
+    fs.change_directory("/home/p1", process_id="P1")
+    fs.change_directory("/home/p2", process_id="P2")
+
+    fs.change_directory("/home/shared", process_id="P1")
+
+    assert fs.present_working_directory(process_id="P1") == "/home/shared"
+    assert fs.present_working_directory(process_id="P2") == "/home/p2"
+
+
+def test_process_cannot_remove_another_process_working_directory():
+    fs = FileManager()
+
+    fs.make_directory("/home")
+    fs.make_directory("/home/p1")
+    fs.make_directory("/home/p2")
+
+    fs.change_directory("/home/p1", process_id="P1")
+    fs.change_directory("/home/p2", process_id="P2")
+
+    with pytest.raises(FileSystemError):
+        fs.remove_directory("/home/p2", process_id="P1")
+
+
+def test_execute_command_uses_process_specific_directory():
+    fs = FileManager()
+
+    fs.make_directory("/home")
+    fs.make_directory("/home/p1")
+    fs.make_directory("/home/p2")
+
+    fs.execute_command("CD /home/p1", process_id="P1")
+    fs.execute_command("CD /home/p2", process_id="P2")
+
+    assert fs.execute_command("PWD", process_id="P1") == "/home/p1"
+    assert fs.execute_command("PWD", process_id="P2") == "/home/p2"

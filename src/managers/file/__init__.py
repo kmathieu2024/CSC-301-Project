@@ -86,12 +86,18 @@ class FileManager:
             name="", is_directory=True, parent=None,
             metadata=FileMetadata(now, now, now),
         )
-        self._cwd = self._root
+        # Each process has its own current working directory.
+        # None is the default context for backward compatibility.
+        self._cwd_by_process = {}
 
     @staticmethod
     def _now() -> datetime:
         return datetime.now(timezone.utc)
-
+    def _get_cwd(self, process_id: str | None = None) -> _Node:
+        """Return the working directory for a process, defaulting to root."""
+        if process_id not in self._cwd_by_process:
+            self._cwd_by_process[process_id] = self._root
+        return self._cwd_by_process[process_id]
     @staticmethod
     def _validate_path(path: str) -> None:
         if not isinstance(path, str) or not path.strip():
@@ -113,10 +119,14 @@ class FileManager:
                 f"User is not authorized to {action} {path!r}"
             )
 
-    def _resolve(self, path: str) -> _Node:
+    def _resolve(
+        self, path: str, process_id: str | None = None
+    ) -> _Node:
         self._validate_path(path)
-        node = self._root if path.startswith("/") else self._cwd
+        node = self._root if path.startswith("/") else self._get_cwd(process_id)
+
         parts = [part for part in path.split("/") if part not in ("", ".")]
+
         for part in parts:
             if not node.is_directory:
                 raise NotADirectoryError(
@@ -132,19 +142,31 @@ class FileManager:
                 raise FileNotFoundError(f"Path not found: {path}")
 
             node = node.children[part]
+
         return node
 
-    def _resolve_parent(self, path: str) -> tuple[_Node, str]:
+    def _resolve_parent(
+        self, path: str, process_id: str | None = None
+    ) -> tuple[_Node, str]:
         self._validate_path(path)
         trimmed = path.rstrip("/")
+
         if not trimmed:
             raise ValueError("The root directory cannot be created or removed")
+
         parent_path, _, name = trimmed.rpartition("/")
+
         if not name or name in (".", ".."):
             raise ValueError("path must identify a named entry")
-        parent = self._resolve(parent_path or ("/" if path.startswith("/") else "."))
+
+        parent = self._resolve(
+            parent_path or ("/" if path.startswith("/") else "."),
+            process_id,
+        )
+
         if not parent.is_directory:
             raise NotADirectoryError(f"Parent of {path!r} is not a directory")
+
         return parent, name
 
     def _display_path(self, node: _Node) -> str:
@@ -159,9 +181,9 @@ class FileManager:
         return "/" + "/".join(reversed(names))
 
     def create_file(self, path: str, content: str = "", *,
-                    user: object = None, owner: str = "system") -> None:
+                    user: object = None, owner: str = "system", process_id: str | None = None) -> None:
         """Create an empty file, or a file initialized with content."""
-        parent, name = self._resolve_parent(path)
+        parent, name = self._resolve_parent(path, process_id)
         canonical = self._display_path(parent).rstrip("/") + "/" + name
         self._authorize(user, "create", canonical)
         if name in parent.children:
@@ -177,9 +199,9 @@ class FileManager:
         parent.metadata.modified_at = now
 
     def write_file(self, path: str, content: str, *,
-                   user: object = None, append: bool = False) -> None:
+                   user: object = None, append: bool = False, process_id: str | None = None) -> None:
         """Replace file contents, or append when append=True."""
-        node = self._resolve(path)
+        node = self._resolve(path, process_id)
         self._authorize(user, "write", self._display_path(node))
         if node.is_directory:
             raise IsADirectoryError(f"Cannot write to directory: {path}")
@@ -191,18 +213,18 @@ class FileManager:
         node.metadata.accessed_at = now
         node.metadata.size = len(node.content)
 
-    def read_file(self, path: str, *, user: object = None) -> str:
+    def read_file(self, path: str, *, user: object = None, process_id: str | None = None) -> str:
         """Return the contents of a file."""
-        node = self._resolve(path)
+        node = self._resolve(path, process_id)
         self._authorize(user, "read", self._display_path(node))
         if node.is_directory:
             raise IsADirectoryError(f"Cannot read directory: {path}")
         node.metadata.accessed_at = self._now()
         return node.content
 
-    def delete_file(self, path: str, *, user: object = None) -> None:
+    def delete_file(self, path: str, *, user: object = None, process_id: str | None = None) -> None:
         """Delete a file; directories must be removed with remove_directory."""
-        node = self._resolve(path)
+        node = self._resolve(path, process_id)
         self._authorize(user, "delete", self._display_path(node))
         if node.is_directory:
             raise IsADirectoryError(f"Cannot delete directory as a file: {path}")
@@ -210,10 +232,10 @@ class FileManager:
         del node.parent.children[node.name]
         node.parent.metadata.modified_at = self._now()
 
-    def make_directory(self, path: str, *, user: object = None,
+    def make_directory(self, path: str, *, user: object = None, process_id: str | None = None,
                        owner: str = "system") -> None:
         """Create one directory (parent directories must already exist)."""
-        parent, name = self._resolve_parent(path)
+        parent, name = self._resolve_parent(path, process_id)
         canonical = self._display_path(parent).rstrip("/") + "/" + name
         self._authorize(user, "mkdir", canonical)
         if name in parent.children:
@@ -225,51 +247,66 @@ class FileManager:
         )
         parent.metadata.modified_at = now
 
-    def remove_directory(self, path: str, *, user: object = None) -> None:
+    def remove_directory(self, path: str, *, user: object = None, process_id: str | None = None) -> None:
         """Remove an empty directory; root and current directory are protected."""
-        node = self._resolve(path)
+        node = self._resolve(path, process_id)
         self._authorize(user, "rmdir", self._display_path(node))
         if not node.is_directory:
             raise NotADirectoryError(f"Not a directory: {path}")
-        current = self._cwd
-        while current is not None:
-            if current is node:
-                raise FileSystemError(
-                    "Cannot remove the root, current directory, or its ancestor"
-                )
-            current = current.parent
+        
+        if node is self._root:
+            raise FileSystemError("Cannot remove the root directory")
+        
+        for cwd in self._cwd_by_process.values():
+            current = cwd
+            while current is not None:
+                if current is node:
+                    raise FileSystemError(
+                        "Cannot remove a directory used by a process "
+                        "or an ancestor of that directory"
+                    )
+                current = current.parent
         if node.children:
             raise DirectoryNotEmptyError(f"Directory is not empty: {path}")
         assert node.parent is not None
         del node.parent.children[node.name]
         node.parent.metadata.modified_at = self._now()
 
-    def list_directory(self, path: str = ".", *, user: object = None) -> list[str]:
+    def list_directory(self, path: str = ".", *, user: object = None, process_id: str | None = None) -> list[str]:
         """Return sorted names in a directory."""
-        node = self._resolve(path)
+        node = self._resolve(path, process_id)
         self._authorize(user, "list", self._display_path(node))
         if not node.is_directory:
             raise NotADirectoryError(f"Not a directory: {path}")
         node.metadata.accessed_at = self._now()
         return sorted(node.children)
 
-    def change_directory(self, path: str, *, user: object = None) -> str:
-        """Change the working directory and return its absolute path."""
-        node = self._resolve(path)
+    def change_directory(
+        self, path: str, *, user: object = None,
+        process_id: str | None = None
+    ) -> str:
+        """Change one process's working directory."""
+        node = self._resolve(path, process_id)
         self._authorize(user, "cd", self._display_path(node))
+
         if not node.is_directory:
             raise NotADirectoryError(f"Not a directory: {path}")
-        self._cwd = node
+
+        self._cwd_by_process[process_id] = node
         node.metadata.accessed_at = self._now()
-        return self.present_working_directory()
 
-    def present_working_directory(self) -> str:
-        """Return the absolute path of the current working directory."""
-        return self._display_path(self._cwd)
+        return self.present_working_directory(process_id=process_id)
 
-    def get_metadata(self, path: str, *, user: object = None) -> FileMetadata:
+
+    def present_working_directory(
+        self, *, process_id: str | None = None
+    ) -> str:
+        """Return the absolute working directory for a process."""
+        return self._display_path(self._get_cwd(process_id))
+
+    def get_metadata(self, path: str, *, user: object = None, process_id: str | None = None) -> FileMetadata:
         """Return a copy of a file or directory's metadata."""
-        node = self._resolve(path)
+        node = self._resolve(path, process_id)
         self._authorize(user, "metadata", self._display_path(node))
         node.metadata.accessed_at = self._now()
         return FileMetadata(
@@ -279,7 +316,7 @@ class FileManager:
         )
 
     
-    def execute_command(self, command: str, *, user: object = None):
+    def execute_command(self, command: str, *, user: object = None, process_id: str | None = None):
         """Execute file-system commands and return user-friendly error messages."""
         try:
             if not isinstance(command, str) or not command.strip():
@@ -300,37 +337,37 @@ class FileManager:
                 path = args[0]
                 content = " ".join(args[1:])
 
-                self.write_file(path, content, user=user)
+                self.write_file(path, content, user=user, process_id=process_id)
                 return ""
 
             if operation == "CREATE" and len(args) == 1:
-                return self.create_file(args[0], user=user)
+                return self.create_file(args[0], user=user, process_id=process_id)
 
             if operation == "READ" and len(args) == 1:
-                return self.read_file(args[0], user=user)
+                return self.read_file(args[0], user=user, process_id=process_id)
 
             if operation == "DELETE" and len(args) == 1:
-                return self.delete_file(args[0], user=user)
+                return self.delete_file(args[0], user=user, process_id=process_id)
 
             if operation == "MKDIR" and len(args) == 1:
-                return self.make_directory(args[0], user=user)
+                return self.make_directory(args[0], user=user, process_id=process_id)
 
             if operation == "RMDIR" and len(args) == 1:
-                return self.remove_directory(args[0], user=user)
+                return self.remove_directory(args[0], user=user, process_id=process_id)
 
             if operation == "LS" and len(args) <= 1:
                 return self.list_directory(
-                    args[0] if args else ".", user=user
+                    args[0] if args else ".", user=user, process_id=process_id
                 )
 
             if operation == "CD" and len(args) == 1:
-                return self.change_directory(args[0], user=user)
+                return self.change_directory(args[0], user=user, process_id=process_id)
 
             if operation == "PWD" and not args:
-                return self.present_working_directory()
+                return self.present_working_directory(process_id=process_id)
 
             if operation == "STAT" and len(args) == 1:
-                return self.get_metadata(args[0], user=user)
+                return self.get_metadata(args[0], user=user, process_id=process_id)
 
             raise ValueError(
                 f"Invalid command or arguments: {command}"
