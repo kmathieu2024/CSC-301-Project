@@ -1,0 +1,22 @@
+MKDIR /docs
+CREATE /docs/notes.txt
+WRITE /docs/notes.txt "Hello OS"
+READ /docs/notes.txt
+LS /docs
+STAT /docs/notes.txt
+MKDIR /docs/archive
+CREATE /docs/archive/tmp.txt
+DELETE /docs/archive/tmp.txt
+RMDIR /docs/archive
+MKDIR /docs
+READ /missing.txt
+WRITE /docs "bad"
+RMDIR /docs
+DELETE /docs
+CREATE /missing/new.txt
+READ /docs/./notes.txt
+READ /docs//notes.txt
+RMDIR /
+DELETE /docs/notes.txt
+RMDIR /docs
+LS /
