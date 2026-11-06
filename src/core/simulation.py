@@ -68,7 +68,7 @@ class SimulationEngine:
         self.reset()
 
     def reset(self):
-        # Reset everything to start a new simulation.
+        # Reset simulation progress while preserving the file system.
 
         for process in self.processes:
             process.reset()
@@ -96,9 +96,6 @@ class SimulationEngine:
         self._runner = None
         self._blocks_done = set()
         self._files_done = set()
-        self.file_manager = FileManager(
-            authorizer=self.file_manager.authorizer
-        )
 
         # Add aarrivals to the event queue.
 
