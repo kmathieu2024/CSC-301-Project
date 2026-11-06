@@ -440,24 +440,6 @@ python -m pytest -q test_parallel.py
 
 The backend test suite passed 92 tests, excluding the dashboard
 and visualization browser tests that require Playwright.
-## Dashboard Testing and Known Issues
-
-### Test Results
-
-The full automated test suite was executed on November 6, 2026.
-
-- 151 tests passed in the initial full run.
-- Two browser tests initially failed because they attempted to access port 5000 while the development server was running on port 5001.
-- Both tests passed when rerun against the working server on port 5001.
-- One pytest fixture deprecation warning remains.
-
-### Known Issues
-
-**Reset button:** During manual testing, clicking Reset produced `Unexpected end of JSON input`. Further investigation is required.
-
-**Step button:** During manual testing, clicking Step appeared to execute the simulation through completion rather than advancing a single step.
-
-**Physical memory frames:** Empty frames and completed-simulation statistics were verified. Occupied-frame visualization still requires testing during an active simulation.
 
 ### Port 5000 Troubleshooting
 
