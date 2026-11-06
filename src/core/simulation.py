@@ -4,6 +4,7 @@ import math
 
 from src.core.process import ProcessState
 from src.managers.memory.memory_manager import NoFrameAvailable
+from src.managers.file import FileManager
 from src.managers.process.scheduler import Scheduler, validate_processes
 
 
@@ -12,8 +13,9 @@ class SimulationEngine:
     # Scheduler decides which process uses the CPU.
 
     def __init__(self, processes, algorithm="fcfs", quantum=4,
-                 aging_interval=4, context_switch=0,
-                 scenario_id="default", seed=0, memory_manager=None):
+             aging_interval=4, context_switch=0,
+             scenario_id="default", seed=0, memory_manager=None,
+             file_manager=None):
 
         self.processes = list(processes)
         validate_processes(self.processes)
@@ -39,6 +41,21 @@ class SimulationEngine:
         self.scenario_id = scenario_id
         self.seed = seed
         self.memory_manager = memory_manager
+        self.file_manager = file_manager if file_manager is not None else FileManager()
+
+        for process in self.processes:
+            for offset, command in process.file_requests.items():
+                if (
+                  isinstance(offset, bool)
+                 or not isinstance(offset, int)
+                 or not 0 <= offset < process.burst_time
+                 or not isinstance(command, str)
+                 or not command.strip()
+                ):
+                    raise ValueError(
+                      "Invalid file request for process " + process.pid
+                    )
+
         for process in self.processes:
             for offset, address in process.memory_references.items():
                 if (isinstance(offset, bool) or not isinstance(offset, int) or
@@ -78,6 +95,10 @@ class SimulationEngine:
         self.next_event_id = 0
         self._runner = None
         self._blocks_done = set()
+        self._files_done = set()
+        self.file_manager = FileManager(
+            authorizer=self.file_manager.authorizer
+        )
 
         # Add aarrivals to the event queue.
 
@@ -327,6 +348,33 @@ class SimulationEngine:
 
                 executed = process.burst_time - process.remaining_time
                 key = (process.pid, executed)
+                if (
+                    executed in process.file_requests
+                    and key not in self._files_done
+                ):
+                    command = process.file_requests[executed]
+                    result = self.file_manager.execute_command(
+                        command,
+                        process_id=process.pid
+                    )
+
+                    failed = isinstance(result, str) and result.startswith("Error:")
+
+                    self.events.append({
+                        "timestamp": self.current_time,
+                        "manager": "file",
+                        "event_type": "file_request",
+                        "entity_id": process.pid,
+                        "action": command,
+                        "previous_state": process.state.value,
+                        "new_state": process.state.value,
+                        "outcome": "error" if failed else "success",
+                        "duration": 0,
+                        "message": str(result) if result is not None else "",
+                        "scenario_id": self.scenario_id
+                    })
+
+                    self._files_done.add(key)
                 if executed in process.blocking_requests and key not in self._blocks_done:
                     duration = process.blocking_requests[executed]
                     self._blocks_done.add(key)
@@ -369,6 +417,10 @@ class SimulationEngine:
                 duration = process.remaining_time
                 future_offsets = [offset for offset in process.blocking_requests if offset > executed]
                 future_offsets += [offset for offset in process.memory_references if offset > executed]
+                future_offsets += [
+                    offset for offset in process.file_requests
+                    if offset > executed
+                ]
                 if future_offsets:
                     duration = min(duration, min(future_offsets) - executed)
 
@@ -514,6 +566,32 @@ class SimulationEngine:
             self.step()
 
         return self.results()
+    def get_file_tree(self):
+        """Return the current in-memory file hierarchy."""
+
+        def build_node(node):
+            result = {
+                "name": node.name if node.name else "/",
+                "type": "directory" if node.is_directory else "file",
+                "size": node.metadata.size,
+                "owner": node.metadata.owner
+            }
+
+            if node.is_directory:
+                result["children"] = [
+                    build_node(child)
+                    for child in sorted(
+                        node.children.values(),
+                        key=lambda item: item.name
+                    )
+                ]
+
+            return result
+
+        if self.file_manager is None:
+            return None
+
+        return build_node(self.file_manager._root)
     def results(self):
         # Calculate the final simulation results.
 
@@ -619,6 +697,15 @@ class SimulationEngine:
 
         return {
             "memory_metrics": self.memory_manager.metrics() if self.memory_manager is not None else None,
+            "memory_frames": [
+                {
+                    "frame": index,
+                    "pid": entry[0] if entry is not None else None,
+                    "page": entry[1] if entry is not None else None
+                }
+                for index, entry in enumerate(self.memory_manager.frames)
+            ] if self.memory_manager is not None else [],
+            "file_tree": self.get_file_tree(),
             "algorithm": self.algorithm,
             "current_time": self.current_time,
             "seed": self.seed,
