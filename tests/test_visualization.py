@@ -329,12 +329,27 @@ def test_reset_clears_visualizations(page: Page, dashboard_url, reset_point):
     )
 
 
-@pytest.mark.parametrize("snapshot", ["partial", "completed", "reset"])
+@pytest.mark.parametrize("snapshot", ["partial", "active", "completed", "reset"])
 def test_download_results_matches_displayed_snapshot(
     page: Page, dashboard_url: str, snapshot: str
 ) -> None:
-    """Export the displayed backend snapshot without advancing the simulation."""
+    """Download what is on screen without moving the simulation forward."""
     prepare_simulation(page, dashboard_url)
+
+    # Use real memory and file requests so the export covers Milestone 3 too.
+    page.locator("#process-file").set_input_files({
+        "name": "m3-processes.json", "mimeType": "application/json",
+        "buffer": json.dumps({"algorithm": "RR", "processes": [
+            {"pid": "P1", "arrival_time": 0, "burst_time": 3, "priority": 1,
+             "memory_references": {"0": 0, "1": 4, "2": 0},
+             "file_requests": {"0": "CREATE /notes.txt"}},
+            {"pid": "P2", "arrival_time": 0, "burst_time": 2, "priority": 2,
+             "memory_references": {"0": 8}},
+        ]}).encode("utf-8"),
+    })
+    expect(page.locator("#upload-status")).to_contain_text("Loaded 2 processes")
+    page.locator("#time-quantum").fill("1")
+    page.locator("#context-switch-cost").fill("0")
     export_button = page.locator("#export-results-button")
     expect(export_button).to_be_disabled()
 
@@ -358,6 +373,8 @@ def test_download_results_matches_displayed_snapshot(
                 run_to_completion(page)
             else:
                 take_step(page)
+                if snapshot in ["active", "reset"]:
+                    take_step(page)
 
         if snapshot == "reset":
             with page.expect_response("**/api/reset"):
@@ -377,10 +394,29 @@ def test_download_results_matches_displayed_snapshot(
         )
         if snapshot == "completed":
             assert completed == len(expected["processes"]) > 0
-        elif snapshot == "partial":
+        elif snapshot in ["partial", "active"]:
             assert completed < len(expected["processes"])
         else:
             assert expected["current_time"] == 0
+
+        # Check the manager data against the displayed cards before downloading.
+        assert "memory_metrics" in expected
+        assert "memory_frames" in expected
+        assert "file_tree" in expected
+        expect(page.locator("#memory-references")).to_have_text(
+            str(expected["memory_metrics"]["references"])
+        )
+        expect(page.locator("#memory-used-frames")).to_have_text(
+            str(expected["memory_metrics"]["used_frames"])
+        )
+        if snapshot == "active":
+            assert expected["memory_metrics"]["used_frames"] == 1
+            assert any(e["manager"] == "file" for e in expected["events"])
+        if snapshot in ["active", "completed", "reset"]:
+            assert expected["file_tree"]["children"][0]["name"] == "notes.txt"
+        if snapshot == "reset":
+            assert expected["memory_metrics"]["references"] == 0
+            assert not any(e["manager"] == "file" for e in expected["events"])
 
         expected_throughput = (
             completed / expected["current_time"]

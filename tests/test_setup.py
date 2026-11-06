@@ -36,3 +36,19 @@ def test_expected_results():
     assert (expected / "process_expected.md").exists()
     assert (expected / "memory_expected.md").exists()
     assert (expected / "file_expected.md").exists()
+
+def test_milestone3_inputs_have_required_lengths_and_commands():
+    folder = ROOT / "test_data" / "milestone3"
+    locality = (folder / "trace_locality.txt").read_text(encoding="utf-8").splitlines()
+    stress = (folder / "trace_stress.txt").read_text(encoding="utf-8").splitlines()
+    commands = (folder / "fs_script_assignment.txt").read_text(encoding="utf-8").splitlines()
+
+    # Keep the original examples and check these longer examples separately.
+    assert 10 <= len(locality) <= 200
+    assert len(stress) == 200
+    assert all(int(address, 0) >= 0 for address in locality)
+    assert all(int(address) >= 0 for address in stress)
+    assert len(commands) >= 12
+    assert {line.split()[0] for line in commands} >= {
+        "mkdir", "ls", "mkfile", "write", "append", "cat", "rm", "rmdir",
+    }

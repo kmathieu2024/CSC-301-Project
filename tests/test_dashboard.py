@@ -1,3 +1,8 @@
+from threading import Thread
+
+from werkzeug.serving import make_server
+from app import app
+
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
@@ -474,3 +479,161 @@ def test_valid_controls_use_backend(page: Page, button):
 
     expect(page.locator("#simulation-error")).to_be_empty()
     expect(page.locator("#simulation-status")).to_contain_text("Simulation time:")
+
+
+@pytest.fixture(scope="module")
+def m3_dashboard_url():
+    # Give these new tests their own local server so the port is not guessed.
+    server = make_server("127.0.0.1", 0, app)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_memory_view_shows_active_frames_and_final_counts(page: Page, m3_dashboard_url):
+    page.goto(m3_dashboard_url)
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+
+    # Upload through the dashboard so this checks the real input path too.
+    # JSON is just the file format the upload control accepts.
+    upload_json(page, {
+        "algorithm": "RR",
+        "processes": [
+            {"pid": "P1", "arrival_time": 0, "burst_time": 3, "priority": 1,
+             "memory_references": {"0": 0, "1": 4, "2": 0}},
+            {"pid": "P2", "arrival_time": 0, "burst_time": 2, "priority": 2,
+             "memory_references": {"0": 8}},
+        ],
+    })
+    expect(page.locator("#process-table-body tr")).to_have_count(2)
+    page.locator("#time-quantum").fill("1")
+    page.locator("#context-switch-cost").fill("0")
+
+    # First step dispatches P1. The next one runs its first CPU slice.
+    for _ in range(2):
+        page.locator("#step-button").click()
+        page.wait_for_function("busy === false")
+
+    page.get_by_role("button", name="Memory Manager", exact=True).click()
+    expect(page.locator("#memory-references")).to_have_text("1")
+    expect(page.locator("#memory-hits")).to_have_text("0")
+    expect(page.locator("#memory-faults")).to_have_text("1")
+    expect(page.locator("#memory-used-frames")).to_have_text("1")
+    expect(page.locator("#memory-frame-grid .occupied")).to_have_count(1)
+    expect(page.locator("#memory-frame-grid .occupied")).to_contain_text("Process: P1 | Page: 0")
+
+    # Finish the same run and check totals, not just that numbers appeared.
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    page.locator("#run-button").click()
+    expect(page.locator("#simulation-status")).to_contain_text("Completed")
+    page.wait_for_function("busy === false")
+    page.get_by_role("button", name="Memory Manager", exact=True).click()
+    expect(page.locator("#memory-references")).to_have_text("4")
+    expect(page.locator("#memory-hits")).to_have_text("1")
+    expect(page.locator("#memory-faults")).to_have_text("3")
+    expect(page.locator("#memory-evictions")).to_have_text("0")
+    expect(page.locator("#memory-fault-rate")).to_have_text("75.0%")
+    expect(page.locator("#memory-used-frames")).to_have_text("0")
+    expect(page.locator("#memory-frame-grid .empty")).to_have_count(3)
+
+    # Reset should clear memory counters and let the same input run again.
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    page.locator("#reset-button").click()
+    page.wait_for_function("busy === false")
+    page.get_by_role("button", name="Memory Manager", exact=True).click()
+    expect(page.locator("#memory-references")).to_have_text("0")
+    expect(page.locator("#memory-used-frames")).to_have_text("0")
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    page.locator("#run-button").click()
+    expect(page.locator("#simulation-status")).to_contain_text("Completed")
+    page.wait_for_function("busy === false")
+    page.get_by_role("button", name="Memory Manager", exact=True).click()
+    expect(page.locator("#memory-faults")).to_have_text("3")
+
+
+def test_file_view_shows_operations_and_reset_keeps_files(page: Page, m3_dashboard_url):
+    page.goto(m3_dashboard_url)
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    upload_json(page, {
+        "algorithm": "FCFS",
+        "processes": [{
+            "pid": "P1", "arrival_time": 0, "burst_time": 4, "priority": 1,
+            "file_requests": {
+                "0": "MKDIR /docs", "1": "CREATE /docs/notes.txt",
+                "2": 'WRITE /docs/notes.txt "Hello OS"', "3": "READ /docs/notes.txt",
+            },
+        }],
+    })
+    page.locator("#context-switch-cost").fill("0")
+    page.locator("#run-button").click()
+    expect(page.locator("#simulation-status")).to_contain_text("Completed")
+    page.wait_for_function("busy === false")
+    page.get_by_role("button", name="File Manager", exact=True).click()
+
+    # Open the directory like a user would and check the actual file entry.
+    page.locator("#file-tree-container summary").filter(has_text="docs").click()
+    expect(page.locator("#file-tree-container")).to_contain_text("notes.txt (8 bytes)")
+    rows = page.locator("#file-activity-body tr")
+    expect(rows).to_have_count(4)
+    for index, command in enumerate([
+        "MKDIR /docs", "CREATE /docs/notes.txt",
+        'WRITE /docs/notes.txt "Hello OS"', "READ /docs/notes.txt",
+    ]):
+        expect(rows.nth(index).locator("td").nth(0)).to_have_text(str(index))
+        expect(rows.nth(index).locator("td").nth(1)).to_have_text("P1")
+        expect(rows.nth(index).locator("td").nth(2)).to_have_text(command)
+        expect(rows.nth(index).locator("td").nth(3)).to_contain_text("Success")
+    expect(rows.nth(3)).to_contain_text("Hello OS")
+
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    page.locator("#reset-button").click()
+    page.wait_for_function("busy === false")
+    expect(page.locator("#result-current-time")).to_have_text("0")
+    page.get_by_role("button", name="File Manager", exact=True).click()
+
+    # Reset clears the run history, but the latest file reset keeps the tree.
+    expect(page.locator("#file-tree-container")).to_contain_text("notes.txt (8 bytes)")
+    expect(page.locator("#file-activity-body")).to_contain_text("No file operations recorded yet.")
+
+    # Repeating CREATE should now show an error, rather than delete the old file.
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    page.locator("#run-button").click()
+    expect(page.locator("#simulation-status")).to_contain_text("Completed")
+    page.wait_for_function("busy === false")
+    page.get_by_role("button", name="File Manager", exact=True).click()
+    rows = page.locator("#file-activity-body tr")
+    expect(rows).to_have_count(4)
+    expect(rows.nth(0)).to_contain_text("already exists")
+    expect(rows.nth(1)).to_contain_text("already exists")
+    expect(rows.nth(3)).to_contain_text("Hello OS")
+
+
+def test_bad_memory_request_shows_error_and_can_be_corrected(page: Page, m3_dashboard_url):
+    page.goto(m3_dashboard_url)
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    workload = {"algorithm": "FCFS", "processes": [{
+        "pid": "P1", "arrival_time": 0, "burst_time": 2, "priority": 1,
+        "memory_references": {"0": -1},
+    }]}
+    upload_json(page, workload)
+    page.locator("#step-button").click()
+    page.wait_for_function("busy === false")
+
+    # The backend rejection should reach the screen without starting the run.
+    expect(page.locator("#simulation-error")).to_contain_text("Invalid memory reference")
+    expect(page.locator("#simulation-status")).to_have_text("Simulation not started.")
+
+    # Correct the same request and make sure the user can keep going.
+    workload["processes"][0]["memory_references"] = {"0": 0}
+    upload_json(page, workload)
+    page.locator("#run-button").click()
+    expect(page.locator("#simulation-status")).to_contain_text("Completed")
+    page.wait_for_function("busy === false")
+    expect(page.locator("#simulation-error")).to_be_empty()
+    page.get_by_role("button", name="Memory Manager", exact=True).click()
+    expect(page.locator("#memory-faults")).to_have_text("1")
