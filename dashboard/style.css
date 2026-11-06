@@ -374,3 +374,41 @@ input[aria-invalid="true"] {
     background: #ede9fe;
     color: #5b21b6;
 }
+
+.memory-frame-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.memory-frame {
+    padding: 18px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+}
+
+.memory-frame.occupied {
+    background: #ede9fe;
+    border-color: #a78bfa;
+}
+
+.memory-frame.empty {
+    background: #f9fafb;
+    color: #6b7280;
+}
+
+.file-tree-node {
+    margin: 8px 0;
+}
+
+.file-tree-children {
+    margin-left: 24px;
+    padding-left: 12px;
+    border-left: 1px solid #d1d5db;
+}
+
+.file-tree-node summary {
+    cursor: pointer;
+    font-weight: 600;
+}

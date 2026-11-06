@@ -247,12 +247,15 @@ processFileInput.addEventListener("change", async function () {
 
             usedIds.add(pid);
 
-            uploadedProcesses.push({
-                pid: pid,
-                arrival_time: process.arrival_time,
-                burst_time: process.burst_time,
-                priority: priority
-            });
+            // Keep memory references and file requests from uploaded processes.
+        uploadedProcesses.push({
+            pid: pid,
+            arrival_time: process.arrival_time,
+            burst_time: process.burst_time,
+            priority: priority,
+            memory_references: process.memory_references || {},
+            file_requests: process.file_requests || {}
+        });
         });
 
         // Update the dashboard only after every process passes validation.
@@ -298,19 +301,30 @@ function collectSimulationInput() {
     const configuration = collectConfiguration(algorithm);
 
     // Create separate copies so backend changes won't alter the input table.
+    // Preserve memory references and file requests for each process.
     const processCopies = processes.map(function (process) {
         return {
             pid: process.pid,
             arrival_time: process.arrival_time,
             burst_time: process.burst_time,
-            priority: process.priority
+            priority: process.priority,
+            memory_references: process.memory_references || {},
+            file_requests: process.file_requests || {}
         };
     });
 
+    // Send the scheduling and memory settings to the simulator.
     return {
         algorithm: algorithm,
         configuration: configuration,
-        processes: processCopies
+        processes: processCopies,
+        memory: {
+            enabled: true,
+            frame_count: 3,
+            page_size: 4,
+            algorithm: "fifo",
+            fault_latency: 0
+        }
     };
 }
 
@@ -356,6 +370,8 @@ async function sendRequest(action, data = {}) {
 
 // Show simulation progress.
 function showResults(result) {
+    renderMemoryManager(result);
+    renderFileManager(result);
     resultsJson = JSON.stringify(result, null, 4);
     document.getElementById("export-results-button").disabled = false;
 
@@ -391,7 +407,7 @@ function showResults(result) {
             : "—";
 
     document.getElementById("result-context-switch-overhead").textContent =
-        result.context_switch_overhead ?? "�";
+        result.context_switch_overhead ?? "�";
 
     const throughput = result.current_time > 0
         ? completed / result.current_time
@@ -752,5 +768,137 @@ function renderProcessMetrics(result) {
         });
 
         tableBody.appendChild(row);
+    });
+}
+// Display memory statistics and frame allocation for the current simulation.
+
+function renderMemoryManager(results) {
+    const metrics = results.memory_metrics;
+    const frames = results.memory_frames || [];
+
+    const values = {
+        "memory-references": metrics?.references ?? "—",
+        "memory-hits": metrics?.hits ?? "—",
+        "memory-faults": metrics?.faults ?? "—",
+        "memory-evictions": metrics?.evictions ?? "—",
+        "memory-fault-rate": metrics
+            ? (metrics.fault_rate * 100).toFixed(1) + "%"
+            : "—",
+        "memory-used-frames": metrics?.used_frames ?? "—"
+    };
+
+    for (const [id, value] of Object.entries(values)) {
+        document.getElementById(id).textContent = value;
+    }
+
+    const container = document.getElementById("memory-frame-grid");
+    container.replaceChildren();
+
+    if (!metrics) {
+        container.textContent =
+            "Memory Manager is not enabled for this simulation.";
+        return;
+    }
+
+    frames.forEach(function (frame) {
+        const card = document.createElement("div");
+        const occupied = frame.pid !== null;
+
+        card.className = occupied
+            ? "memory-frame occupied"
+            : "memory-frame empty";
+
+        const heading = document.createElement("strong");
+        heading.textContent = "Frame " + frame.frame;
+
+        const content = document.createElement("p");
+        content.textContent = occupied
+            ? "Process: " + frame.pid + " | Page: " + frame.page
+            : "Empty";
+
+        card.append(heading, content);
+        container.appendChild(card);
+    });
+}
+// Display the file system tree and file operation history.
+
+function renderFileManager(results) {
+    const container = document.getElementById("file-tree-container");
+    container.replaceChildren();
+
+    function createTreeNode(node) {
+        const item = document.createElement("div");
+        item.className = "file-tree-node";
+
+        if (node.type === "directory") {
+            const details = document.createElement("details");
+            details.open = node.name === "/";
+
+            const summary = document.createElement("summary");
+            summary.textContent = "📁 " + node.name;
+            details.appendChild(summary);
+
+            const children = document.createElement("div");
+            children.className = "file-tree-children";
+
+            (node.children || []).forEach(function (child) {
+                children.appendChild(createTreeNode(child));
+            });
+
+            details.appendChild(children);
+            item.appendChild(details);
+        } else {
+            item.textContent = "📄 " + node.name +
+                " (" + node.size + " bytes)";
+        }
+
+        return item;
+    }
+
+    if (results.file_tree) {
+        container.appendChild(createTreeNode(results.file_tree));
+    } else {
+        container.textContent = "File Manager is not available.";
+    }
+
+    const tbody = document.getElementById("file-activity-body");
+    tbody.replaceChildren();
+
+    const events = (results.events || []).filter(function (event) {
+        return event.manager === "file";
+    });
+
+    if (events.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 4;
+        cell.textContent = "No file operations recorded yet.";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        return;
+    }
+
+    events.forEach(function (event) {
+        const row = document.createElement("tr");
+
+        // Show the file command and whether it succeeded.
+        const values = [
+            event.timestamp ?? "—",
+            event.entity_id ?? "—",
+            event.action ?? "—",
+            event.outcome === "error"
+                ? "Error: " + event.message
+                : "Success" + (event.message ? ": " + event.message : "")
+        ];
+
+        values.forEach(function (value) {
+            const cell = document.createElement("td");
+            cell.textContent = typeof value === "object"
+                ? JSON.stringify(value)
+                : String(value);
+            row.appendChild(cell);
+        });
+
+        tbody.appendChild(row);
     });
 }

@@ -26,6 +26,8 @@ class Process:
     memory_references: dict[int, int] = field(default_factory=dict)
     # CPU-time offsets mapped to durations spent blocked.
     blocking_requests: dict[int, float] = field(default_factory=dict)
+    # CPU-time offsets mapped to file-system commands.
+    file_requests: dict[int, str] = field(default_factory=dict)
 
     # Simulation state
     remaining_time: int = 0
