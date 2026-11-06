@@ -119,3 +119,122 @@ the page fault is counted when a frame can be assigned. This prevents the
 simulator from repeatedly replacing pages before their owners can use them.
 This is a simplified simulation of memory pressure, not a complete model of
 an operating system's page reclaim or disk I/O.
+
+
+### File system simulation
+
+The file system is implemented by `FileManager` in
+`src/managers/file/__init__.py`. It provides a hierarchical, in-memory file
+system for creating and managing files and directories. Its contents are held
+in memory and are reset when a new `FileManager` instance is created.
+
+#### Features
+
+- Create files with optional initial text content.
+- Read, replace, append to, and delete files.
+- Create and remove directories; directories must be empty before removal.
+- List directory contents and change the current working directory.
+- Retrieve file and directory metadata, including creation, modification, and
+  access timestamps, owner, size, and permissions.
+- Maintain a separate current working directory for each process while sharing
+  the same file and directory tree. Pass a `process_id` to use a process-specific
+  working directory. Omitting it uses the default context for compatibility.
+- Delegate authorization checks to an injected authorizer. The default
+  `AllowAllAuthorizer` permits all operations.
+
+#### Python usage
+
+```python
+from src.managers.file import FileManager
+
+file_system = FileManager()
+
+# Create a directory and a file.
+file_system.make_directory("/home")
+file_system.make_directory("/home/P1")
+file_system.create_file("/home/P1/notes.txt", "Initial notes")
+
+# Give process P1 its own current working directory.
+file_system.change_directory("/home/P1", process_id="P1")
+
+# Relative paths are resolved from P1's working directory.
+print(file_system.present_working_directory(process_id="P1"))
+print(file_system.read_file("notes.txt", process_id="P1"))
+
+# Append content and inspect the directory.
+file_system.write_file(
+    "notes.txt", "\\nMore notes", append=True, process_id="P1"
+)
+print(file_system.list_directory(".", process_id="P1"))
+```
+
+#### File system methods
+
+| Method | Description |
+| --- | --- |
+| `create_file(path, content="")` | Create a file, optionally with initial content. |
+| `read_file(path)` | Return a file's text content. |
+| `write_file(path, content, append=False)` | Replace content or append when `append=True`. |
+| `delete_file(path)` | Delete a file. |
+| `make_directory(path)` | Create one directory; its parent must already exist. |
+| `remove_directory(path)` | Remove an empty directory. The root directory and directories used as a process's current directory (or their ancestors) are protected. |
+| `list_directory(path=".")` | Return sorted entry names in a directory. |
+| `change_directory(path)` | Change the selected process's current working directory. |
+| `present_working_directory()` | Return the selected process's absolute working directory. |
+| `get_metadata(path)` | Return a `FileMetadata` snapshot for a file or directory. |
+| `execute_command(command)` | Execute a supported command string and return its result or a user-friendly error message. |
+
+The methods that access paths accept an optional keyword-only `process_id`.
+Use the same ID for successive operations by the same simulated process so
+relative paths and `CD`/`PWD` behave consistently. Absolute paths beginning
+with `/` are resolved from the file system root.
+
+#### Command interface
+
+`execute_command()` supports these commands:
+
+| Command | Example | Purpose |
+| --- | --- | --- |
+| `CREATE` | `CREATE notes.txt` | Create an empty file. |
+| `WRITE` | `WRITE notes.txt "Hello world"` | Replace a file's content. |
+| `READ` | `READ notes.txt` | Display file content. |
+| `DELETE` | `DELETE notes.txt` | Delete a file. |
+| `MKDIR` | `MKDIR documents` | Create a directory. |
+| `RMDIR` | `RMDIR documents` | Remove an empty directory. |
+| `LS` | `LS` or `LS /home` | List directory entries. |
+| `CD` | `CD /home/P1` | Change the working directory. |
+| `PWD` | `PWD` | Display the working directory. |
+| `STAT` | `STAT notes.txt` | Return file or directory metadata. |
+
+Pass the process ID separately when executing a command:
+
+```python
+file_system.execute_command("CD /home/P1", process_id="P1")
+print(file_system.execute_command("PWD", process_id="P1"))
+```
+
+Direct method calls raise file-system exceptions derived from `FileSystemError`,
+including `FileNotFoundError`, `FileAlreadyExistsError`, `NotADirectoryError`,
+`IsADirectoryError`, `DirectoryNotEmptyError`, and `AuthorizationError`.
+`execute_command()` catches supported operation and input errors and returns
+user-friendly error strings.
+
+#### Authorization
+
+A custom authorizer can be supplied when creating a `FileManager`. It must
+implement `authorize(user, action, path)` and return `True` to allow the
+operation or `False` to reject it. Operations accept an optional `user`
+argument, which is passed to the authorizer.
+
+```python
+from src.managers.file import FileManager
+
+class ReadOnlyAuthorizer:
+    def authorize(self, user, action, path):
+        return action in {"read", "list", "metadata"}
+
+file_system = FileManager(authorizer=ReadOnlyAuthorizer())
+```
+
+The built-in `AllowAllAuthorizer` is intended as the default policy for
+standalone use; it does not enforce access restrictions.
