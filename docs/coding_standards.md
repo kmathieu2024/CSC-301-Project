@@ -35,3 +35,5 @@ All simulator components will be written in Python 3.11+.
 ## Code Reviews
 - At least one teammate must review each PR.
 - Do not merge code that fails automated tests.
+- Do not merge changes into main unless their functionality is correct and verified.
+  Main must remain clean and working at all times.

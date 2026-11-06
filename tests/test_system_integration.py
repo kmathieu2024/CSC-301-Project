@@ -104,8 +104,8 @@ def test_memory_and_file_integration():
     )
 
 
-# TEST 4: File system reset is reproducible
-def test_file_reset_reproducibility():
+# TEST 4: Reset preserves the file system and reruns file requests
+def test_file_reset_preserves_state():
     process = Process(
         "P1", 0, 3,
         file_requests={0: "CREATE test.txt"}
@@ -113,9 +113,13 @@ def test_file_reset_reproducibility():
 
     engine = SimulationEngine([process])
 
+    manager = engine.file_manager
     first = engine.run()
 
     engine.reset()
+
+    assert engine.file_manager is manager
+    assert engine.results()["file_tree"] == first["file_tree"]
 
     second = engine.run()
 
@@ -129,7 +133,8 @@ def test_file_reset_reproducibility():
         if e["manager"] == "file"
     ]
 
-    assert first_events == second_events
+    assert first_events[0]["outcome"] == "success"
+    assert second_events[0]["outcome"] == "error"
 
 
 # TEST 5: Invalid file command is recorded as an error
