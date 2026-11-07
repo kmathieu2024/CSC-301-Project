@@ -47,7 +47,7 @@ def test_reference_lifecycle_and_disabled_conflict(page, memory_url):
     add_reference(page)
     expect(page.locator("#reference-table-body tr")).to_have_count(1)
     add_reference(page, address="12")
-    expect(page.locator("#reference-error")).to_contain_text("already exists")
+    expect(page.locator("#reference-offset-error")).to_contain_text("already exists")
     page.get_by_role("button", name="Edit reference P1 offset 0", exact=True).click()
     page.locator("#reference-address").fill("12")
     page.locator("#reference-save").click()
@@ -71,7 +71,8 @@ def test_reference_lifecycle_and_disabled_conflict(page, memory_url):
 def test_invalid_editor(page, memory_url, offset, address):
     open_memory(page, memory_url)
     add_reference(page, offset, address)
-    expect(page.locator("#reference-error")).not_to_be_empty()
+    error_id = "reference-offset-error" if offset in ("-1", "4", "1.5", "") else "reference-address-error"
+    expect(page.locator("#" + error_id)).not_to_be_empty()
     expect(page.locator("#reference-table-body")).to_contain_text("No memory references")
 
 
@@ -193,7 +194,7 @@ def test_offset_edit_conflict_cancel_and_import_replacement(page, memory_url):
     page.get_by_role("button", name="Edit reference P1 offset 0", exact=True).click()
     page.locator("#reference-offset").fill("1")
     page.locator("#reference-save").click()
-    expect(page.locator("#reference-error")).to_contain_text("already exists")
+    expect(page.locator("#reference-offset-error")).to_contain_text("already exists")
     assert page.evaluate("processes[0].memory_references") == {"0": 8, "1": 12}
     page.locator("#reference-offset").fill("2")
     page.locator("#reference-save").click()
@@ -222,3 +223,140 @@ def test_api_defaults_and_rejected_request_preserves_simulation():
         original = application.engine
         assert client.post("/api/start", json=invalid_payload("references", {"0.5": 0})).status_code == 400
         assert application.engine is original
+
+
+@pytest.mark.parametrize("settings", [
+    {}, {"frame_count": 0}, {"page_size": 1.5},
+    {"algorithm": "optimal"}, {"fault_latency": -1},
+])
+def test_disabled_memory_validates_without_constructing_manager(monkeypatch, settings):
+    import app as application
+
+    def unexpected_construction(*args, **kwargs):
+        raise AssertionError("Disabled memory must not construct a MemoryManager")
+
+    monkeypatch.setattr(application.MemoryManager, "__init__", unexpected_construction)
+    data = payload()
+    data["processes"][0]["memory_references"] = {}
+    data["memory"] = {"enabled": False, **settings}
+    with app.test_client() as client:
+        response = client.post("/api/start", json=data)
+    if settings:
+        assert response.status_code == 400
+    else:
+        assert response.status_code == 200
+        assert application.engine.memory_manager is None
+        assert response.get_json()["memory_frames"] == []
+
+
+@pytest.mark.parametrize("first_corrected", ["offset", "address"])
+def test_reference_field_errors_are_independent(page, memory_url, first_corrected):
+    open_memory(page, memory_url)
+    add_reference(page, "0", "8")
+    before = page.evaluate("JSON.stringify(processes[0].memory_references)")
+    add_reference(page, "4", "-1")
+    errors = {field: page.locator(f"#reference-{field}-error") for field in ("offset", "address")}
+    expect(errors["offset"]).to_contain_text("less than burst time (4)")
+    expect(errors["address"]).to_contain_text("whole number of 0 or greater")
+    for field, error in errors.items():
+        control = page.locator(f"#reference-{field}")
+        expect(error).to_be_visible()
+        expect(error).to_have_css("color", "rgb(180, 35, 24)")
+        expect(error).to_have_css("font-size", "14px")
+        expect(control).to_have_attribute("aria-invalid", "true")
+        expect(control).to_have_attribute("aria-describedby", f"reference-{field}-error")
+        expect(control).to_have_css("border-top-color", "rgb(180, 35, 24)")
+        assert error.bounding_box()["y"] >= control.bounding_box()["y"] + control.bounding_box()["height"]
+    assert page.evaluate("JSON.stringify(processes[0].memory_references)") == before
+    values = {"offset": "1", "address": "12"}
+    other = "address" if first_corrected == "offset" else "offset"
+    page.locator(f"#reference-{first_corrected}").fill(values[first_corrected])
+    expect(errors[first_corrected]).to_be_empty()
+    expect(page.locator(f"#reference-{first_corrected}")).not_to_have_attribute("aria-invalid", "true")
+    expect(errors[other]).not_to_be_empty()
+    expect(page.locator(f"#reference-{other}")).to_have_attribute("aria-invalid", "true")
+    assert page.evaluate("JSON.stringify(processes[0].memory_references)") == before
+    page.locator(f"#reference-{other}").fill(values[other])
+    expect(errors[other]).to_be_empty()
+    page.locator("#reference-save").click()
+    assert page.evaluate("processes[0].memory_references") == {"0": 8, "1": 12}
+    add_reference(page, "0", "-1")
+    expect(errors["offset"]).to_contain_text("already exists")
+    expect(errors["address"]).not_to_be_empty()
+    assert page.evaluate("processes[0].memory_references") == {"0": 8, "1": 12}
+
+
+@pytest.mark.parametrize("button", ["Run", "Step"])
+@pytest.mark.parametrize("problem", ["setting", "disabled", "reference"])
+def test_actual_controls_explain_memory_block(page, memory_url, button, problem):
+    open_memory(page, memory_url)
+    add_reference(page)
+    if problem == "setting":
+        page.locator("#memory-frame-count").fill("0")
+        expect(page.locator("#memory-error")).to_be_empty()
+    elif problem == "disabled":
+        page.locator("#memory-enabled").uncheck()
+        expect(page.locator("#memory-error")).to_contain_text("references exist")
+        expect(page.locator("#memory-enabled")).to_have_attribute("aria-describedby", "memory-error")
+        assert page.locator("#memory-error").evaluate(
+            "element => element.previousElementSibling.contains(document.getElementById('memory-enabled'))"
+        )
+        expect(page.locator("#memory-error")).to_have_css("color", "rgb(180, 35, 24)")
+        expect(page.locator("#memory-frame-count")).to_be_disabled()
+    else:
+        add_reference(page, "4", "-1")
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    requests = []
+    page.on("request", lambda request: requests.append(request.url) if "/api/" in request.url else None)
+    page.get_by_role("button", name=button, exact=True).click()
+    notice = page.locator("#memory-start-error")
+    expect(page.locator("#memory")).to_be_visible()
+    expect(notice).to_be_visible()
+    expect(notice).to_be_in_viewport()
+    expect(notice).to_contain_text("simulation could not start")
+    expect(notice).to_have_css("color", "rgb(180, 35, 24)")
+    assert requests == []
+    if problem == "setting":
+        page.locator("#memory-frame-count").fill("2")
+    elif problem == "disabled":
+        page.locator("#memory-enabled").check()
+    else:
+        page.locator("#reference-offset").fill("1")
+        expect(notice).to_be_visible()
+        page.locator("#reference-address").fill("12")
+    expect(notice).to_be_hidden()
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    with page.expect_request("**/api/start"):
+        page.get_by_role("button", name="Step", exact=True).click()
+    page.wait_for_function("busy === false")
+
+
+def test_general_reference_error_and_button_styles(page, memory_url):
+    page.goto(memory_url)
+    page.get_by_role("button", name="Memory Manager", exact=True).click()
+    page.locator("#reference-save").click()
+    expect(page.locator("#reference-error")).to_have_text("Select an existing process first.")
+    expect(page.locator("#reference-error")).to_be_visible()
+    expect(page.locator("#reference-offset-error")).to_be_empty()
+    expect(page.locator("#reference-address-error")).to_be_empty()
+    expect(page.locator("#reference-offset")).not_to_have_attribute("aria-invalid", "true")
+    page.get_by_role("button", name="Process Manager", exact=True).click()
+    enter_process(page)
+    primary_color = page.locator("#process-form .primary").evaluate("element => getComputedStyle(element).backgroundColor")
+    page.get_by_role("button", name="Memory Manager", exact=True).click()
+    add_reference(page)
+    page.mouse.move(0, 0)
+    expect(page.locator("#reference-save")).to_have_css("background-color", primary_color)
+    page.get_by_role("button", name="Edit reference P1 offset 0", exact=True).click()
+    expect(page.locator("#reference-save")).to_have_text("Save Reference")
+    expect(page.locator("#reference-save")).to_have_css("background-color", primary_color)
+    page.locator("#reference-save").focus()
+    page.keyboard.press("Tab")
+    expect(page.locator("#reference-cancel")).to_have_css("outline-style", "solid")
+    for name in ["Edit reference P1 offset 0", "Remove reference P1 offset 0"]:
+        expect(page.get_by_role("button", name=name, exact=True)).to_have_class("memory-secondary")
+    checkbox = page.locator("#memory-enabled")
+    assert checkbox.bounding_box()["width"] >= 22
+    assert checkbox.bounding_box()["height"] >= 22
+    page.get_by_text("Enable memory simulation", exact=True).click()
+    expect(checkbox).not_to_be_checked()

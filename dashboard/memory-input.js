@@ -3,19 +3,14 @@ const memoryFields = {
     page_size: "memory-page-size", fault_latency: "memory-fault-latency"
 };
 let referenceEdit = null;
+let referenceValidationActive = false;
 const referenceError = document.getElementById("reference-error");
-
-function inputChanged() {
-    simulationStatus.textContent = "Simulation not started.";
-    document.getElementById("step-button").disabled = false;
-}
 
 function applyMemoryConfiguration(memory) {
     document.getElementById("memory-enabled").checked = memory.enabled;
     for (const [key, id] of Object.entries(memoryFields)) document.getElementById(id).value = memory[key];
     cancelReferenceEdit();
     validateMemoryControls();
-    inputChanged();
 }
 
 function collectMemoryConfiguration() {
@@ -57,21 +52,67 @@ function validateMemoryControls() {
         }
     }
     const error = document.getElementById("memory-error");
-    error.textContent = "";
-    try { collectMemoryConfiguration(); } catch (problem) {
-        error.textContent = problem.message;
-        valid = false;
+    const conflict = !enabled && processes.some(p => Object.keys(p.memory_references ?? {}).length);
+    error.textContent = conflict
+        ? "Memory is disabled but references exist. Enable memory simulation or remove the references to start."
+        : "";
+    const enableControl = document.getElementById("memory-enabled");
+    if (conflict) enableControl.setAttribute("aria-invalid", "true");
+    else enableControl.removeAttribute("aria-invalid");
+    if (referenceValidationActive && !validateReferenceFields()) valid = false;
+    valid = valid && !conflict;
+    if (valid) {
+        const notice = document.getElementById("memory-start-error");
+        notice.hidden = true;
+        notice.textContent = "";
+    }
+    return valid;
+}
+
+function clearReferenceErrors() {
+    referenceError.textContent = "";
+    for (const id of ["reference-offset", "reference-address"]) {
+        document.getElementById(id + "-error").textContent = "";
+        document.getElementById(id).removeAttribute("aria-invalid");
+    }
+}
+
+function validateReferenceFields() {
+    clearReferenceErrors();
+    const process = processes.find(p => p.pid === document.getElementById("reference-pid").value);
+    if (!process) {
+        referenceError.textContent = "Select an existing process first.";
+        return false;
+    }
+    let valid = true;
+    // Check independently so one field's error never hides the other field's error.
+    for (const [id, name] of [["reference-offset", "CPU-execution offset"], ["reference-address", "Virtual address"]]) {
+        try {
+            const value = readWholeNumber(id, name, 0);
+            if (id === "reference-offset") {
+                if (value >= process.burst_time)
+                    throw new Error("CPU-execution offset must be less than burst time (" + process.burst_time + ").");
+                if (Object.hasOwn(process.memory_references ?? {}, value) &&
+                    (!referenceEdit || referenceEdit.offset !== String(value)))
+                    throw new Error("That offset already exists. Use Edit to change its reference.");
+            }
+        } catch (problem) {
+            document.getElementById(id + "-error").textContent = problem.message;
+            document.getElementById(id).setAttribute("aria-invalid", "true");
+            valid = false;
+        }
     }
     return valid;
 }
 
 function cancelReferenceEdit() {
     referenceEdit = null;
+    referenceValidationActive = false;
     document.getElementById("reference-form").reset();
     document.getElementById("reference-pid").disabled = false;
     document.getElementById("reference-save").textContent = "Add Reference";
     document.getElementById("reference-cancel").hidden = true;
-    referenceError.textContent = "";
+    clearReferenceErrors();
 }
 
 function renderReferenceEditor() {
@@ -100,9 +141,11 @@ function renderReferenceEditor() {
             for (const action of ["Edit", "Remove"]) {
                 const button = document.createElement("button");
                 button.type = "button";
+                button.className = "memory-secondary";
                 button.textContent = action;
                 button.setAttribute("aria-label", action + " reference " + process.pid + " offset " + offset);
                 button.onclick = function () {
+                    if (busy) return;
                     cancelReferenceEdit();
                     if (action === "Remove") {
                         delete process.memory_references[offset];
@@ -135,27 +178,35 @@ function renderReferenceEditor() {
 
 document.getElementById("reference-form").addEventListener("submit", function (event) {
     event.preventDefault();
-    referenceError.textContent = "";
-    try {
-        const process = processes.find(p => p.pid === document.getElementById("reference-pid").value);
-        if (!process) throw new Error("Select an existing process first.");
-        const offset = readWholeNumber("reference-offset", "CPU-execution offset", 0);
-        const address = readWholeNumber("reference-address", "Virtual address", 0);
-        validateReferences({[offset]: address}, process.burst_time);
-        const references = process.memory_references ?? {};
-        if (Object.hasOwn(references, offset) && (!referenceEdit || referenceEdit.offset !== String(offset)))
-            throw new Error("That offset already exists. Use Edit to change its reference.");
-        if (referenceEdit) delete references[referenceEdit.offset];
-        references[offset] = address;
-        process.memory_references = references;
-        cancelReferenceEdit();
-        renderReferenceEditor();
-        inputChanged();
-    } catch (problem) { referenceError.textContent = problem.message; }
+    if (busy) return;
+    referenceValidationActive = true;
+    if (!validateReferenceFields()) return;
+    const process = processes.find(p => p.pid === document.getElementById("reference-pid").value);
+    const offset = Number(document.getElementById("reference-offset").value);
+    const address = Number(document.getElementById("reference-address").value);
+    const references = process.memory_references ?? {};
+    // Mutate only after every field passes validation, including edit collisions.
+    if (referenceEdit) delete references[referenceEdit.offset];
+    references[offset] = address;
+    process.memory_references = references;
+    cancelReferenceEdit();
+    renderReferenceEditor();
+    inputChanged();
 });
-document.getElementById("reference-cancel").onclick = cancelReferenceEdit;
+
+for (const id of ["reference-pid", "reference-offset", "reference-address"]) {
+    document.getElementById(id).addEventListener("input", function () {
+        if (referenceValidationActive) validateMemoryControls();
+    });
+}
+
+document.getElementById("reference-cancel").onclick = function () {
+    cancelReferenceEdit();
+    validateMemoryControls();
+};
 for (const id of ["memory-enabled", ...Object.values(memoryFields)]) {
     document.getElementById(id).addEventListener("input", function () {
+        if (busy) return;
         renderReferenceEditor();
         inputChanged();
     });

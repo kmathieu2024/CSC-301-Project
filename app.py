@@ -90,21 +90,22 @@ def start():
 
         memory_manager = None
 
-        # Validate settings even when disabled; only attach the manager if enabled.
+        # Validate settings without allocating frames when memory is disabled.
         for key in ("frame_count", "page_size"):
             value = memory_config.get(key, 3 if key == "frame_count" else 4)
             if isinstance(value, int) and value > 9007199254740991:
                 raise ValueError(key + " exceeds the supported integer range")
-        configured_memory = MemoryManager(
-            frame_count=memory_config.get("frame_count", 3),
-            page_size=memory_config.get("page_size", 4),
-            algorithm=memory_config.get("algorithm", "fifo"),
-            fault_latency=memory_config.get("fault_latency", 0)
-        )
+        memory_settings = {
+            "frame_count": memory_config.get("frame_count", 3),
+            "page_size": memory_config.get("page_size", 4),
+            "algorithm": memory_config.get("algorithm", "fifo"),
+            "fault_latency": memory_config.get("fault_latency", 0),
+        }
+        MemoryManager.validate_configuration(**memory_settings)
         if memory_config.get("algorithm", "fifo") not in ("fifo", "lru"):
             raise ValueError("Memory policy must be fifo or lru")
         if memory_config.get("enabled", True):
-            memory_manager = configured_memory
+            memory_manager = MemoryManager(**memory_settings)
         engine = SimulationEngine(
             processes,
             algorithm=data["algorithm"],

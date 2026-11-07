@@ -466,7 +466,7 @@ def test_controls_focus_invalid_configuration(page: Page, button):
 
     expect(page.locator("#time-quantum")).to_be_focused()
     expect(page.locator("#simulation-status")).to_have_text(
-        "Simulation not started."
+        "Inputs changed. Run or Step to start a new simulation."
     )
 
 @pytest.mark.parametrize("button", ["Run", "Step"])
@@ -620,13 +620,36 @@ def test_bad_memory_request_shows_error_and_can_be_corrected(page: Page, m3_dash
         "pid": "P1", "arrival_time": 0, "burst_time": 2, "priority": 1,
         "memory_references": {"0": -1},
     }]}
+    # Chunk 1 rejects invalid imports atomically instead of sending them to start.
+    # Keep an existing valid process to verify that rejection preserves user work.
+    enter_process(page, pid="Existing")
+    previous_input = page.evaluate("JSON.stringify(collectSimulationInput())")
+    api_requests = []
+    page.on("request", lambda request: api_requests.append(request.url)
+            if "/api/" in request.url else None)
     upload_json(page, workload)
-    page.locator("#step-button").click()
-    page.wait_for_function("busy === false")
+    expect(page.locator("#process-error")).to_contain_text(
+        "Virtual address must be a nonnegative integer."
+    )
+    assert page.evaluate("JSON.stringify(collectSimulationInput())") == previous_input
+    expect(page.locator("#simulation-status")).to_have_text("Inputs changed. Run or Step to start a new simulation.")
+    assert api_requests == []
 
-    # The backend rejection should reach the screen without starting the run.
-    expect(page.locator("#simulation-error")).to_contain_text("Invalid memory reference")
-    expect(page.locator("#simulation-status")).to_have_text("Simulation not started.")
+    # Browser validation can be bypassed: the real API must independently reject
+    # the same workload, while leaving any existing simulation untouched.
+    import app as application
+
+    with app.test_client() as client:
+        valid_input = page.evaluate("collectSimulationInput()")
+        assert client.post("/api/start", json=valid_input).status_code == 200
+        before = client.post("/api/step").get_json()
+        previous_engine = application.engine
+        invalid_input = {**workload, "configuration": {}}
+        rejection = client.post("/api/start", json=invalid_input)
+        assert rejection.status_code == 400
+        assert "Invalid memory" in rejection.get_json()["error"]
+        assert application.engine is previous_engine
+        assert application.engine.results() == before
 
     # Correct the same request and make sure the user can keep going.
     workload["processes"][0]["memory_references"] = {"0": 0}
