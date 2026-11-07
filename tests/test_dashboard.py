@@ -1,3 +1,8 @@
+from threading import Thread
+
+from werkzeug.serving import make_server
+from app import app
+
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
@@ -465,8 +470,8 @@ def test_controls_focus_invalid_configuration(page: Page, button):
     )
 
 @pytest.mark.parametrize("button", ["Run", "Step"])
-def test_valid_controls_use_backend(page: Page, button):
-    page.goto("http://127.0.0.1:5000/")
+def test_valid_controls_use_backend(page: Page, button, controls_dashboard_url):
+    page.goto(controls_dashboard_url)
     page.get_by_role("button", name="Process Manager", exact=True).click()
     enter_process(page)
 
@@ -474,3 +479,16 @@ def test_valid_controls_use_backend(page: Page, button):
 
     expect(page.locator("#simulation-error")).to_be_empty()
     expect(page.locator("#simulation-status")).to_contain_text("Simulation time:")
+
+
+@pytest.fixture(scope="module")
+def controls_dashboard_url():
+    server = make_server("127.0.0.1", 0, app)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
