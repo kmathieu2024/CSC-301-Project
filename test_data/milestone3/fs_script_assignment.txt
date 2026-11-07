@@ -1,0 +1,22 @@
+mkdir /docs
+mkfile /docs/notes.txt
+write /docs/notes.txt "Hello"
+append /docs/notes.txt " OS"
+cat /docs/notes.txt
+ls /docs
+mkdir /docs/archive
+mkfile /docs/archive/tmp.txt
+rm /docs/archive/tmp.txt
+rmdir /docs/archive
+mkdir /docs
+cat /missing.txt
+write /docs "bad"
+rmdir /docs
+rm /docs
+mkfile /missing/new.txt
+cat /docs/./notes.txt
+cat /docs//notes.txt
+rmdir /
+rm /docs/notes.txt
+rmdir /docs
+ls /
