@@ -45,6 +45,7 @@ const processTableBody = document.getElementById("process-table-body");
 processForm.addEventListener("submit", function (event) {
     // Prevent the form from refreshing the page.
     event.preventDefault();
+    if (busy) return;
     processError.textContent = "";
 
     if (!validateConfiguration()) {
@@ -107,12 +108,14 @@ processForm.addEventListener("submit", function (event) {
     });
 
     renderProcessTable();
+    inputChanged();
     processForm.reset();
     document.getElementById("process-id").focus();
 });
 
 // Rebuild the table using the current processes.
 function renderProcessTable() {
+    renderReferenceEditor();
     processTableBody.replaceChildren();
 
     if (processes.length === 0) {
@@ -151,9 +154,11 @@ function renderProcessTable() {
         removeButton.setAttribute("aria-label", "Remove " + process.pid);
 
         removeButton.addEventListener("click", function () {
+            if (busy) return;
             processes.splice(index, 1);
             processError.textContent = "";
             renderProcessTable();
+            inputChanged();
         });
 
         actionCell.appendChild(removeButton);
@@ -168,7 +173,7 @@ const uploadStatus = document.getElementById("upload-status");
 processFileInput.addEventListener("change", async function () {
     const file = processFileInput.files[0];
 
-    if (!file) {
+    if (busy || !file) {
         return;
     }
 
@@ -178,7 +183,7 @@ processFileInput.addEventListener("change", async function () {
     try {
         // Reading a file takes time, so await waits for its text.
         const fileText = await file.text();
-        const data = JSON.parse(fileText);
+        const data = parseInputJson(fileText);
 
         const validAlgorithms = ["FCFS", "SJF", "SRTF", "RR", "PRIORITY"];
 
@@ -193,7 +198,17 @@ processFileInput.addEventListener("change", async function () {
             );
         }
 
-        collectConfiguration(data.algorithm);
+        validateMemoryAssociations(data);
+        const importedMemory = validateMemory(data.memory);
+        const importedConfiguration = data.configuration;
+        if (importedConfiguration !== undefined) {
+            if (!isObject(importedConfiguration)) throw new Error("Configuration must be an object.");
+            for (const [key, minimum] of [["context_switch_cost", 0], ["time_quantum", 1], ["aging_interval", 1]]) {
+                if (importedConfiguration[key] !== undefined &&
+                    (!Number.isSafeInteger(importedConfiguration[key]) || importedConfiguration[key] < minimum))
+                    throw new Error(key + " must be a whole number of " + minimum + " or greater.");
+            }
+        }
 
         if (!Array.isArray(data.processes) || data.processes.length === 0) {
             throw new Error("The file must contain a nonempty processes list.");
@@ -248,17 +263,31 @@ processFileInput.addEventListener("change", async function () {
             usedIds.add(pid);
 
             // Keep memory references and file requests from uploaded processes.
-        uploadedProcesses.push({
-            pid: pid,
-            arrival_time: process.arrival_time,
-            burst_time: process.burst_time,
-            priority: priority,
-            memory_references: process.memory_references || {},
-            file_requests: process.file_requests || {}
-        });
+            uploadedProcesses.push({
+                ...process,
+                pid: pid,
+                arrival_time: process.arrival_time,
+                burst_time: process.burst_time,
+                priority: priority,
+                memory_references: validateReferences(
+                    process.memory_references === undefined ? {} : process.memory_references,
+                    process.burst_time
+                ),
+                file_requests: process.file_requests || {}
+            });
         });
 
+        if (!importedMemory.enabled && uploadedProcesses.some(p => Object.keys(p.memory_references).length))
+            throw new Error("Enable memory simulation or remove memory references before importing.");
+        // File reading is asynchronous: do not replace inputs if Run began meanwhile.
+        if (busy) throw new Error("Wait for the simulation to pause before importing.");
         // Update the dashboard only after every process passes validation.
+        applyMemoryConfiguration(importedMemory);
+        if (importedConfiguration) {
+            for (const [key, id] of [["context_switch_cost", "context-switch-cost"], ["time_quantum", "time-quantum"], ["aging_interval", "aging-interval"]]) {
+                if (importedConfiguration[key] !== undefined) document.getElementById(id).value = importedConfiguration[key];
+            }
+        }
         processes.length = 0;
 
         uploadedProcesses.forEach(function (process) {
@@ -268,6 +297,7 @@ processFileInput.addEventListener("change", async function () {
         algorithmSelect.value = data.algorithm;
         updateConfigurationFields();
         renderProcessTable();
+        inputChanged();
 
         uploadStatus.textContent =
             "Loaded " + processes.length + " processes from " + file.name + ".";
@@ -304,11 +334,15 @@ function collectSimulationInput() {
     // Preserve memory references and file requests for each process.
     const processCopies = processes.map(function (process) {
         return {
+            ...process,
             pid: process.pid,
             arrival_time: process.arrival_time,
             burst_time: process.burst_time,
             priority: process.priority,
-            memory_references: process.memory_references || {},
+            memory_references: validateReferences(
+                process.memory_references === undefined ? {} : process.memory_references,
+                process.burst_time
+            ),
             file_requests: process.file_requests || {}
         };
     });
@@ -318,13 +352,7 @@ function collectSimulationInput() {
         algorithm: algorithm,
         configuration: configuration,
         processes: processCopies,
-        memory: {
-            enabled: true,
-            frame_count: 3,
-            page_size: 4,
-            algorithm: "fifo",
-            fault_latency: 0
-        }
+        memory: collectMemoryConfiguration()
     };
 }
 
@@ -348,6 +376,43 @@ let running = false;
 let busy = false;
 let savedInput = "";
 let resultsJson = "";
+
+// Capture the HTML's initial placeholders so invalidation restores every display
+// consistently, without resetting the backend or manufacturing simulation results.
+const initialResultDisplays = Array.from(document.querySelectorAll(
+    ".simulation-results .metric p, #process-metrics-body, #gantt-chart, #gantt-empty, " +
+    "#memory .metric p, #memory-frame-grid, #file-tree-container, #file-activity-body"
+), element => ({element, initial: element.cloneNode(true)}));
+
+function inputChanged() {
+    started = false;
+    savedInput = "";
+    resultsJson = "";
+    for (const {element, initial} of initialResultDisplays) {
+        element.replaceChildren(...Array.from(initial.childNodes, node => node.cloneNode(true)));
+        element.hidden = initial.hidden;
+    }
+    document.getElementById("export-results-button").disabled = true;
+    document.getElementById("step-button").disabled = false;
+    simulationError.textContent = "";
+    simulationStatus.textContent = "Inputs changed. Run or Step to start a new simulation.";
+}
+
+let lockedWorkloadControls = [];
+
+function lockWorkloadEditing() {
+    lockedWorkloadControls = Array.from(document.querySelectorAll(
+        "#process input, #process select, #process-form button, #process-table-body button, " +
+        "#memory input, #memory select, #memory button"
+    ), control => ({control, disabled: control.disabled}));
+    for (const {control} of lockedWorkloadControls) control.disabled = true;
+}
+
+function unlockWorkloadEditing() {
+    for (const {control, disabled} of lockedWorkloadControls) control.disabled = disabled;
+    lockedWorkloadControls = [];
+}
+
 
 
 // Send information to Python.
@@ -455,8 +520,18 @@ async function startSimulation() {
         return false;
     }
 
+    if (!validateMemoryControls()) {
+        const notice = document.getElementById("memory-start-error");
+        notice.textContent = "The simulation could not start. Correct the highlighted memory inputs below.";
+        notice.hidden = false;
+        showPage("memory", document.querySelector("button[onclick*=\"'memory'\"]"));
+        notice.focus();
+        notice.scrollIntoView({block: "start"});
+        return false;
+    }
     const input = collectSimulationInput();
     const text = JSON.stringify(input);
+    lockWorkloadEditing();
 
     if (!started || savedInput !== text) {
         const result = await sendRequest("start", input);
@@ -482,9 +557,10 @@ async function stepSimulation() {
         }
     } catch (error) {
         simulationError.textContent = error.message;
+    } finally {
+        busy = false;
+        unlockWorkloadEditing();
     }
-
-    busy = false;
 }
 
 
@@ -513,6 +589,7 @@ async function runSimulation() {
     } finally {
         running = false;
         busy = false;
+        unlockWorkloadEditing();
         document.getElementById("pause-button").disabled = true;
     }
 }
@@ -635,13 +712,15 @@ const configurationInputIds = [
 
 configurationInputIds.forEach(function (inputId) {
     document.getElementById(inputId).addEventListener("input", function () {
-        simulationStatus.textContent = "Simulation not started.";
+        if (busy) return;
+        inputChanged();
         validateConfiguration();
     });
 });
 
 algorithmSelect.addEventListener("change", function () {
-    simulationStatus.textContent = "Simulation not started.";
+    if (busy) return;
+    inputChanged();
     validateConfiguration();
 });
 

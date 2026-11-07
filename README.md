@@ -468,3 +468,60 @@ python -m pytest -q
 ```
 
 Browser tests that use a hardcoded local server URL require the server to be available at that address.
+
+
+## Milestone 3: memory inputs
+
+In Memory Manager, enable memory simulation and choose FIFO/LRU, frame count,
+page size in bytes, and page-fault latency in simulation time units. Select an
+existing PID to add references; use Edit or Remove on a reference row.
+CPU offsets count time already executed by that process, **not global time**.
+Addresses are virtual byte addresses; page number is `floor(address / page_size)`.
+Offsets must be integers from zero through `burst_time - 1`; addresses must be
+nonnegative integers. Numeric integers must fit JavaScript's safe integer range.
+Latency may be fractional but must be finite and nonnegative.
+
+The existing Process Manager JSON upload accepts, for example:
+
+```json
+{
+  "algorithm": "FCFS",
+  "configuration": {"context_switch_cost": 0},
+  "memory": {
+    "enabled": true,
+    "frame_count": 3,
+    "page_size": 4,
+    "algorithm": "fifo",
+    "fault_latency": 0
+  },
+  "processes": [
+    {
+      "pid": "P1",
+      "arrival_time": 0,
+      "burst_time": 4,
+      "priority": 1,
+      "memory_references": {"0": 8, "2": 9},
+      "file_requests": {"1": "mkdir /example"}
+    }
+  ]
+}
+```
+
+When `memory` or its optional settings are absent, both dashboard and API use
+memory enabled, 3 frames, 4-byte pages, FIFO (`fifo`), and zero fault latency.
+Missing `memory_references` means no references; missing priority means 1.
+Older process files remain supported. Missing scheduling configuration retains
+current dashboard scheduling controls. Imported configuration values update those
+controls when supplied. Process fields, including `file_requests`, are preserved.
+
+Reference maps belong inside their process, use canonical decimal keys (`"0"`,
+`"1"`, etc.), and cannot contain duplicate keys or offset aliases such as `"01"`.
+The complete import is validated before replacing inputs. Disabling memory keeps
+references visible, but Run/Step are blocked until memory is enabled again or all
+references are explicitly removed. Disabled memory configuration fields retain
+their displayed values for re-enabling; disabled requests use default settings
+with `enabled: false`. Changing inputs starts a fresh simulation on Run/Step.
+
+Run all tests from the repository root with `python -m pytest -q`, which includes
+root-level `test_parallel.py`. New memory dashboard tests use an isolated server
+on an available port and exercise the real API and memory/frame rendering.

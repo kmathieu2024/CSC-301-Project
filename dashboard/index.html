@@ -295,6 +295,76 @@
 
 <div id="memory" class="page">
     <h1>Memory Manager</h1>
+    <p id="memory-start-error" tabindex="-1" class="field-error memory-notice" role="alert" hidden></p>
+    <section class="card">
+        <h2>Memory Configuration</h2>
+        <div class="memory-enable-control">
+            <label for="memory-enabled">
+                <input type="checkbox" id="memory-enabled" aria-describedby="memory-error" checked>
+                Enable memory simulation
+            </label>
+            <p id="memory-error" class="field-error" role="alert"></p>
+        </div>
+        <div class="process-fields">
+            <div>
+                <label for="memory-policy">Replacement policy</label>
+                <select id="memory-policy" aria-describedby="memory-policy-error">
+                    <option value="fifo">FIFO</option>
+                    <option value="lru">LRU</option>
+                </select>
+                <p id="memory-policy-error" class="field-error" role="alert"></p>
+            </div>
+            <div>
+                <label for="memory-frame-count">Frame count</label>
+                <input type="number" id="memory-frame-count"
+                    aria-describedby="memory-frame-count-error"
+                    value="3" min="1" step="1">
+                <p id="memory-frame-count-error" class="field-error" role="alert"></p>
+            </div>
+            <div>
+                <label for="memory-page-size">Page size (bytes)</label>
+                <input type="number" id="memory-page-size"
+                    aria-describedby="memory-page-size-error"
+                    value="4" min="1" step="1">
+                <p id="memory-page-size-error" class="field-error" role="alert"></p>
+            </div>
+            <div>
+                <label for="memory-fault-latency">Page-fault latency (simulation units)</label>
+                <input type="number" id="memory-fault-latency"
+                    aria-describedby="memory-fault-latency-error"
+                    value="0" min="0" step="any">
+                <p id="memory-fault-latency-error" class="field-error" role="alert"></p>
+            </div>
+        </div>
+    </section>
+    <section class="card">
+        <h2>Process Memory References</h2>
+        <p>The offset is CPU time already executed by this process, not global simulation time.
+        Enter a virtual byte address, not a page number. Page = floor(address / page size).</p>
+        <form id="reference-form" novalidate>
+            <div class="process-fields">
+                <div><label for="reference-pid">Existing PID</label><select id="reference-pid" aria-describedby="reference-error"></select></div>
+                <div>
+                    <label for="reference-offset">CPU-execution offset</label>
+                    <input id="reference-offset" aria-describedby="reference-offset-error" type="number" min="0" step="1">
+                    <p id="reference-offset-error" class="field-error" role="alert"></p>
+                </div>
+                <div>
+                    <label for="reference-address">Virtual address (bytes)</label>
+                    <input id="reference-address" aria-describedby="reference-address-error" type="number" min="0" step="1">
+                    <p id="reference-address-error" class="field-error" role="alert"></p>
+                </div>
+            </div>
+            <button id="reference-save" class="primary" type="submit">Add Reference</button>
+            <button id="reference-cancel" class="memory-secondary" type="button" hidden>Cancel Edit</button>
+        </form>
+        <p id="reference-error" class="field-error" role="alert"></p>
+        <div class="table-container"><table class="process-table">
+            <thead><tr><th>PID</th><th>CPU offset</th><th>Virtual address (bytes)</th><th>Page number</th><th>Actions</th></tr></thead>
+            <tbody id="reference-table-body"></tbody>
+        </table></div>
+    </section>
+
     <p>View memory usage, page replacement activity, and frame allocation.</p>
 
     <section class="card">
@@ -408,7 +478,9 @@
 
     </div>
 
+    <script src="input-validation.js"></script>
     <script src="script.js"></script>
+    <script src="memory-input.js"></script>
 
 </body>
 </html>

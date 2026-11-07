@@ -412,3 +412,101 @@ input[aria-invalid="true"] {
     cursor: pointer;
     font-weight: 600;
 }
+
+.card .field-error {
+    color: #b42318;
+}
+
+/* Memory input controls reuse the Process Manager's spacing and colors. */
+#memory .card + .card {
+    margin-top: 24px;
+}
+
+.memory-enable-control {
+    margin: 20px 0 24px;
+}
+
+.memory-enable-control label {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+#memory-enabled {
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    accent-color: #6c55f7;
+}
+
+#memory .process-fields select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #b8bdcc;
+    border-radius: 6px;
+    font: inherit;
+}
+
+/* More specific than .card p and .page > p, including the tab notification. */
+#memory .field-error {
+    color: #b42318;
+    margin: 6px 0 0;
+    font-size: 14px;
+}
+
+#memory [aria-invalid="true"] {
+    border-color: #b42318;
+}
+
+#memory .memory-notice {
+    margin-bottom: 20px;
+    padding: 12px;
+    border: 1px solid #b42318;
+    border-radius: 6px;
+    background: #fef3f2;
+}
+
+.memory-secondary {
+    padding: 10px 16px;
+    border: 1px solid #b8bdcc;
+    border-radius: 6px;
+    background: #f3f4f6;
+    color: #151936;
+    font: inherit;
+    cursor: pointer;
+}
+
+#reference-cancel {
+    margin-left: 12px;
+}
+
+#reference-table-body .memory-secondary + .memory-secondary {
+    margin-left: 8px;
+}
+
+#memory .primary:hover {
+    background: #5742d6;
+}
+
+#memory .memory-secondary:hover {
+    background: #e5e7eb;
+}
+
+#memory button:focus-visible,
+#memory input:focus-visible,
+#memory select:focus-visible {
+    outline: 3px solid #6c55f7;
+    outline-offset: 3px;
+}
+
+#memory button:disabled,
+#memory input:disabled,
+#memory select:disabled {
+    background: #e5e7eb;
+    color: #555;
+    cursor: not-allowed;
+}
