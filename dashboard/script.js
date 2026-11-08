@@ -381,7 +381,8 @@ let resultsJson = "";
 // consistently, without resetting the backend or manufacturing simulation results.
 const initialResultDisplays = Array.from(document.querySelectorAll(
     ".simulation-results .metric p, #process-metrics-body, #gantt-chart, #gantt-empty, " +
-    "#memory .metric p, #memory-frame-grid, #file-tree-container, #file-activity-body"
+    "#memory .metric p, #memory-frame-grid, #memory-mapping-body, #memory-history-body, " +
+    "#memory-transition-body, #file-tree-container, #file-activity-body"
 ), element => ({element, initial: element.cloneNode(true)}));
 
 function inputChanged() {
@@ -423,7 +424,20 @@ async function sendRequest(action, data = {}) {
         body: JSON.stringify(data)
     });
 
-    const result = await response.json();
+    // A preview proxy or server error may return plain text/HTML instead of JSON.
+    // Report the actual HTTP response rather than exposing JSON.parse's error.
+    const body = await response.text();
+    let result;
+    try {
+        result = JSON.parse(body);
+    } catch (error) {
+        const detail = body.trim().slice(0, 160) || "Empty response";
+        throw new Error(
+            "Unexpected response from /api/" + action + " (HTTP " + response.status + "). " +
+            "The server returned non-JSON content: " + detail +
+            " Open http://127.0.0.1:5000/ in an external browser and check the server terminal."
+        );
+    }
 
     if (!response.ok) {
         throw new Error(result.error || "Simulation failed");
@@ -847,56 +861,6 @@ function renderProcessMetrics(result) {
         });
 
         tableBody.appendChild(row);
-    });
-}
-// Display memory statistics and frame allocation for the current simulation.
-
-function renderMemoryManager(results) {
-    const metrics = results.memory_metrics;
-    const frames = results.memory_frames || [];
-
-    const values = {
-        "memory-references": metrics?.references ?? "—",
-        "memory-hits": metrics?.hits ?? "—",
-        "memory-faults": metrics?.faults ?? "—",
-        "memory-evictions": metrics?.evictions ?? "—",
-        "memory-fault-rate": metrics
-            ? (metrics.fault_rate * 100).toFixed(1) + "%"
-            : "—",
-        "memory-used-frames": metrics?.used_frames ?? "—"
-    };
-
-    for (const [id, value] of Object.entries(values)) {
-        document.getElementById(id).textContent = value;
-    }
-
-    const container = document.getElementById("memory-frame-grid");
-    container.replaceChildren();
-
-    if (!metrics) {
-        container.textContent =
-            "Memory Manager is not enabled for this simulation.";
-        return;
-    }
-
-    frames.forEach(function (frame) {
-        const card = document.createElement("div");
-        const occupied = frame.pid !== null;
-
-        card.className = occupied
-            ? "memory-frame occupied"
-            : "memory-frame empty";
-
-        const heading = document.createElement("strong");
-        heading.textContent = "Frame " + frame.frame;
-
-        const content = document.createElement("p");
-        content.textContent = occupied
-            ? "Process: " + frame.pid + " | Page: " + frame.page
-            : "Empty";
-
-        card.append(heading, content);
-        container.appendChild(card);
     });
 }
 // Display the file system tree and file operation history.

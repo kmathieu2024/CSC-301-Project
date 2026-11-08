@@ -387,14 +387,25 @@
                 <p id="memory-evictions">—</p>
             </div>
             <div class="metric">
-                <h3>Fault Rate</h3>
+                <h3>Fault Rate (%)</h3>
                 <p id="memory-fault-rate">—</p>
+            </div>
+            <div class="metric">
+                <h3>Hit Rate (%)</h3>
+                <p id="memory-hit-rate">&#8212;</p>
+            </div>
+            <div class="metric">
+                <h3>Cumulative Modeled Page-Fault Latency (simulation units)</h3>
+                <p id="memory-total-fault-latency">&#8212;</p>
             </div>
             <div class="metric">
                 <h3>Occupied Frames</h3>
                 <p id="memory-used-frames">—</p>
             </div>
         </div>
+        <p>Rates use executed references; both are 0% before any reference executes.
+        Cumulative modeled fault latency is the sum charged to faults, not elapsed simulation delay
+        or total/average access time. Configured latency per fault is not included in result snapshots.</p>
     </section>
 
     <section class="card">
@@ -404,6 +415,67 @@
             <p>Start a memory-enabled simulation to view frames.</p>
         </div>
     </section>
+    <section class="card">
+        <h2>Resident Page Mappings</h2>
+        <p>Current snapshot only: each process owns its own pages. Page numbers and frame numbers are distinct.</p>
+        <div class="table-container">
+            <table class="process-table" aria-label="Resident Page Mappings">
+                <thead>
+                    <tr>
+                        <th scope="col">PID</th>
+                        <th scope="col">Resident page number</th>
+                        <th scope="col">Frame number</th>
+                    </tr>
+                </thead>
+                <tbody id="memory-mapping-body"><tr><td colspan="3">Start a simulation to view resident mappings.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Memory Reference History</h2>
+        <p>Accumulated executed references, in backend event order. History remains after frames are released. Addresses are bytes; modeled fault latency uses simulation time units.</p>
+        <div class="table-container">
+            <table class="process-table" aria-label="Memory Reference History">
+                <thead>
+                    <tr>
+                        <th scope="col">Timestamp (simulation units)</th>
+                        <th scope="col">PID</th>
+                        <th scope="col">Virtual address (bytes)</th>
+                        <th scope="col">Page number</th>
+                        <th scope="col">Frame number</th>
+                        <th scope="col">Physical address (bytes)</th>
+                        <th scope="col">Hit / fault</th>
+                        <th scope="col">Evicted PID</th>
+                        <th scope="col">Evicted page number</th>
+                        <th scope="col">Modeled fault latency (simulation units)</th>
+                    </tr>
+                </thead>
+                <tbody id="memory-history-body"><tr><td colspan="10">Start a simulation to view executed memory references.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Process State Transitions</h2>
+        <p>WAITING is the backend blocked state. Recorded actions are shown verbatim. A WAITING transition does not necessarily mean a page fault.</p>
+        <div class="table-container">
+            <table class="process-table" aria-label="Process State Transitions">
+                <thead>
+                    <tr>
+                        <th scope="col">Timestamp (simulation units)</th>
+                        <th scope="col">PID</th>
+                        <th scope="col">Previous state</th>
+                        <th scope="col">New state</th>
+                        <th scope="col">Event type</th>
+                        <th scope="col">Recorded action</th>
+                    </tr>
+                </thead>
+                <tbody id="memory-transition-body"><tr><td colspan="6">Start a simulation to view process state transitions.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
 </div>
 
 <div id="file" class="page">
@@ -479,6 +551,7 @@
     </div>
 
     <script src="input-validation.js"></script>
+    <script src="memory-results.js"></script>
     <script src="script.js"></script>
     <script src="memory-input.js"></script>
 

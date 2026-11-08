@@ -470,7 +470,7 @@ python -m pytest -q
 Browser tests that use a hardcoded local server URL require the server to be available at that address.
 
 
-## Milestone 3: memory inputs
+## Memory Manager inputs
 
 In Memory Manager, enable memory simulation and choose FIFO/LRU, frame count,
 page size in bytes, and page-fault latency in simulation time units. Select an
@@ -481,7 +481,7 @@ Offsets must be integers from zero through `burst_time - 1`; addresses must be
 nonnegative integers. Numeric integers must fit JavaScript's safe integer range.
 Latency may be fractional but must be finite and nonnegative.
 
-The existing Process Manager JSON upload accepts, for example:
+Upload a JSON file from Process Manager, for example:
 
 ```json
 {
@@ -519,9 +519,43 @@ Reference maps belong inside their process, use canonical decimal keys (`"0"`,
 The complete import is validated before replacing inputs. Disabling memory keeps
 references visible, but Run/Step are blocked until memory is enabled again or all
 references are explicitly removed. Disabled memory configuration fields retain
-their displayed values for re-enabling; disabled requests use default settings
-with `enabled: false`. Changing inputs starts a fresh simulation on Run/Step.
+their displayed values for re-enabling.
 
-Run all tests from the repository root with `python -m pytest -q`, which includes
-root-level `test_parallel.py`. New memory dashboard tests use an isolated server
-on an available port and exercise the real API and memory/frame rendering.
+Accepted input changes clear previous results and disable export. Run or Step
+starts a fresh simulation. Rejected edits and imports preserve existing inputs
+and results. Workload editing is disabled while a simulation is running.
+
+
+## Memory Manager results
+
+Frame cards show the current frame number, owning PID, resident page, or empty
+state. **Resident Page Mappings** lists each resident `(PID, page number)` and
+its physical frame. Identically numbered pages in different processes stay
+separate. Termination releases frames and removes those resident mappings;
+release is not an eviction.
+
+**Memory Reference History** retains executed events after release: timestamp,
+PID, virtual byte address, page number, frame number, physical byte address,
+hit/fault, evicted PID/page, and modeled fault latency. History follows event
+order, including events with the same timestamp. Only executed references appear.
+Hit and fault rates are percentages; zero references show 0%.
+**Cumulative modeled page-fault latency** sums the modeled latency of faults in
+simulation time units. This differs from the configured latency per fault and
+from elapsed simulation delay or total/average memory access time.
+
+**Process State Transitions** shows timestamped old/new states, event type, and
+recorded action. WAITING means blocked and does not necessarily indicate a page
+fault. Actions are displayed as recorded, without inferring a blocking cause.
+
+Displays update from simulation snapshots during Run, Step, and Reset, rather
+than at every simulated time unit. FCFS can execute several references inside one
+Step, while RR separates dispatch and CPU-slice snapshots. Reset clears memory
+counters, resident mappings, and activity histories while preserving the file
+system. Empty states distinguish disabled memory, no executed references, and
+no resident pages.
+
+For a quick check, select RR with quantum 1, FIFO, 2 frames, page size 4, fault
+latency 0. Add P1 (arrival 0, burst 6) with references `0:1`, `1:5`, `2:2`, `3:9`,
+`4:6` (offset:virtual address). After eight Steps, page 2 occupies frame 0 and
+page 1 frame 1. Run to finish: 5 references, 3 faults, 2 hits, 1 eviction, 40% hit
+rate, 60% fault rate, cumulative latency 0, and empty frames with history retained.
