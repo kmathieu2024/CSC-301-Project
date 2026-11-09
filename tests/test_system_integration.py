@@ -31,6 +31,8 @@ def test_file_request_creates_successful_event():
     assert engine.file_manager.read_file("/test.txt") == ""
     assert file_events[0]["entity_id"] == "P1"
     assert file_events[0]["timestamp"] == 0
+    assert engine.file_manager.get_metadata("/test.txt").owner == "P1"
+    assert results["file_storage_used"] == 0
 
 
 # TEST 2: Memory page fault and recovery
@@ -292,7 +294,6 @@ class WritePolicy:
         return not (self.deny_write and action == "write")
 
 
-@pytest.mark.xfail(strict=True, reason="M3-F06: successful READ content is misclassified")
 def test_reading_error_prefix_text_is_still_a_successful_read():
     # Error: is legitimate file content here, not a failed operation.
     process = Process("P1", 0, 3, file_requests={
