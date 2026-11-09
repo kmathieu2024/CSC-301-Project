@@ -510,3 +510,31 @@ input[aria-invalid="true"] {
     color: #555;
     cursor: not-allowed;
 }
+
+
+/* File request controls share the existing editor and button styles. */
+#file .card + .card { margin-top: 24px; }
+#file-request-form select, #file-request-form textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #b8bdcc;
+    border-radius: 6px;
+    font: inherit;
+}
+#file-request-form [aria-invalid="true"] { border-color: #b42318; }
+#file-request-cancel { margin-left: 12px; }
+#file-request-table-body button + button { margin-left: 8px; }
+#file .primary:hover { background: #5742d6; }
+#file .memory-secondary:hover { background: #e5e7eb; }
+#file input:focus-visible, #file textarea:focus-visible, #file select:focus-visible, #file button:focus-visible {
+    outline: 3px solid #6c55f7;
+    outline-offset: 3px;
+}
+#file input:disabled, #file textarea:disabled, #file select:disabled, #file button:disabled {
+    background: #e5e7eb;
+    color: #555;
+    cursor: not-allowed;
+}
+#file-request-table-body td:nth-child(3), #file-activity-body td:last-child {
+    white-space: pre-wrap;
+}

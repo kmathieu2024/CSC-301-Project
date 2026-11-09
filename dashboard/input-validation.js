@@ -71,3 +71,16 @@ function parseInputJson(text) {
     value();
     return parsed;
 }
+
+
+function validateFileRequests(requests, burst) {
+    if (!isObject(requests)) throw new Error("file_requests must be an offset-to-command object.");
+    for (const [offset, command] of Object.entries(requests)) {
+        if (!/^(0|[1-9][0-9]*)$/.test(offset) || !Number.isSafeInteger(Number(offset)) || Number(offset) >= burst)
+            throw new Error("File-request offset must be a nonnegative integer less than burst time (canonical decimal key).");
+        if (typeof command !== "string" || !command.trim())
+            throw new Error("File command must be nonempty text.");
+    }
+    // Keep commands verbatim; the backend alone parses command syntax.
+    return requests;
+}
