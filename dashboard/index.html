@@ -434,6 +434,10 @@
 
     <section class="card">
         <h2>Memory Reference History</h2>
+        <div class="control-buttons">
+            <button id="export-memory-csv" type="button" disabled>Export Memory History CSV</button>
+            <button id="export-memory-log" type="button" disabled>Export Memory Log</button>
+        </div>
         <p>Accumulated executed references, in backend event order. History remains after frames are released. Addresses are bytes; modeled fault latency uses simulation time units.</p>
         <div class="table-container">
             <table class="process-table" aria-label="Memory Reference History">
@@ -483,6 +487,44 @@
     <p>Explore the simulated file system and review file operations.</p>
 
     <section class="card">
+        <h2>Process File Requests</h2>
+        <p>Offsets count CPU time already executed by the selected process, not global simulation time.
+        One command can be configured at each offset. Commands are parsed and executed by the simulator.</p>
+        <form id="file-request-form" novalidate>
+            <div class="process-fields">
+                <div>
+                    <label for="file-request-pid">Existing PID</label>
+                    <select id="file-request-pid" aria-describedby="file-request-error"></select>
+                </div>
+                <div>
+                    <label for="file-request-offset">CPU-execution offset</label>
+                    <input id="file-request-offset" type="number" min="0" step="1" aria-describedby="file-request-offset-error">
+                    <p id="file-request-offset-error" class="field-error" role="alert"></p>
+                </div>
+                <div>
+                    <label for="file-request-command">File command</label>
+                    <textarea id="file-request-command" rows="2" placeholder='WRITE /docs/notes.txt "Hello OS"' aria-describedby="file-request-command-error"></textarea>
+                    <p id="file-request-command-error" class="field-error" role="alert"></p>
+                </div>
+            </div>
+            <button id="file-request-save" class="primary" type="submit">Add Request</button>
+            <button id="file-request-cancel" class="memory-secondary" type="button" hidden>Cancel Edit</button>
+        </form>
+        <p id="file-request-error" class="field-error" role="alert"></p>
+        <p>Supported commands: <code>MKDIR /docs</code>, <code>CREATE /docs/notes.txt</code>,
+        <code>WRITE /docs/notes.txt "Hello OS"</code>, <code>READ /docs/notes.txt</code>,
+        <code>DELETE /docs/notes.txt</code>, <code>RMDIR /docs</code>, <code>LS /</code>,
+        <code>CD /docs</code>, <code>PWD</code>, <code>STAT /docs</code>.
+        Operation errors are recorded in the activity log; each process has its own working directory in the shared file tree.</p>
+        <div class="table-container">
+            <table class="process-table" aria-label="Configured file requests">
+                <thead><tr><th scope="col">PID</th><th scope="col">CPU offset</th><th scope="col">Command</th><th scope="col">Actions</th></tr></thead>
+                <tbody id="file-request-table-body"><tr><td colspan="4">No file requests configured.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
         <h2>File System Tree</h2>
         <p>Expand directories to view their files and subdirectories.</p>
         <div id="file-tree-container">
@@ -492,6 +534,10 @@
 
     <section class="card">
         <h2>File System Activity</h2>
+        <div class="control-buttons">
+            <button id="export-file-csv" type="button" disabled>Export File Activity CSV</button>
+            <button id="export-file-log" type="button" disabled>Export File Log</button>
+        </div>
         <div class="table-container">
             <table class="process-table">
                 <thead>
@@ -499,12 +545,13 @@
                         <th scope="col">Time</th>
                         <th scope="col">Process</th>
                         <th scope="col">Operation</th>
+                        <th scope="col">Outcome</th>
                         <th scope="col">Details</th>
                     </tr>
                 </thead>
                 <tbody id="file-activity-body">
                     <tr>
-                        <td colspan="4">No file operations recorded yet.</td>
+                        <td colspan="5">No file operations recorded yet.</td>
                     </tr>
                 </tbody>
             </table>
@@ -553,7 +600,9 @@
     <script src="input-validation.js"></script>
     <script src="memory-results.js"></script>
     <script src="script.js"></script>
+    <script src="manager-exports.js"></script>
     <script src="memory-input.js"></script>
+    <script src="file-input.js"></script>
 
 </body>
 </html>

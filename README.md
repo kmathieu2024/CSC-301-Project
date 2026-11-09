@@ -559,3 +559,69 @@ latency 0. Add P1 (arrival 0, burst 6) with references `0:1`, `1:5`, `2:2`, `3:9
 `4:6` (offset:virtual address). After eight Steps, page 2 occupies frame 0 and
 page 1 frame 1. Run to finish: 5 references, 3 faults, 2 hits, 1 eviction, 40% hit
 rate, 60% fault rate, cumulative latency 0, and empty frames with history retained.
+
+
+## File Manager requests
+
+In File Manager, select an existing PID and enter a CPU-execution offset and a
+command. The offset counts CPU time already executed by that process, not global
+simulation time, and must be an integer from 0 through `burst_time - 1`. Each
+process can have one command per offset. Use Edit, Save Request, Cancel Edit, or
+Remove in the request table. Commands, including quoted text and spaces, are
+preserved; command syntax and operation errors are reported when executed.
+
+Supported commands are `CREATE`, `WRITE`, `READ`, `DELETE`, `MKDIR`, `RMDIR`,
+`LS`, `CD`, `PWD`, and `STAT`. For example, upload this workload in Process Manager:
+
+```json
+{
+  "algorithm": "FCFS",
+  "processes": [{
+    "pid": "P1", "arrival_time": 0, "burst_time": 4,
+    "file_requests": {
+      "0": "MKDIR /docs",
+      "1": "CREATE /docs/notes.txt",
+      "2": "WRITE /docs/notes.txt \"Hello OS\"",
+      "3": "READ /docs/notes.txt"
+    }
+  }]
+}
+```
+
+Run produces `/docs/notes.txt` containing `Hello OS`. The activity log shows four
+successful operations at times 0, 1, 2, and 3; READ returns `Hello OS`, while the
+other operations show No output. The tree and activity log use actual simulation
+results, and directory expansion is retained across snapshot updates.
+
+Processes share one file tree but have separate working directories, initially
+`/`. `CD /docs` changes only the requesting process's working directory; absolute
+paths let another process access the same files. Requests without a `file_requests`
+map default to none. Invalid imports and edits leave valid inputs and results intact.
+
+Reset restarts process execution and clears the activity history while preserving
+the file tree and working directories. Repeating CREATE or MKDIR after Reset can
+therefore report an already-exists error. Accepted input changes clear displayed
+results; the next Run/Step starts a fresh simulation with an empty file system.
+Request editing is locked while a simulation runs.
+
+
+## Memory and File Manager exports
+
+Memory Manager provides **Export Memory History CSV** and **Export Memory Log**.
+The CSV contains timestamp, PID, virtual address, page, frame, physical address,
+hit/fault, evicted PID/page, and modeled fault latency. File Manager provides
+**Export File Activity CSV** and **Export File Log** for timestamp, PID, command,
+backend outcome, and returned details. Timestamps and latency use simulation time
+units; addresses use bytes.
+
+Exports contain the latest displayed snapshot, including partial and paused runs.
+CSV files are UTF-8 with headers and quoted fields preserving commas, quotes,
+spaces, Unicode, and embedded line breaks. The `.log` files are UTF-8 text with
+one original event encoded as JSON per line, in recorded order; escaped newlines
+remain part of their original field values. Missing CSV values are empty fields.
+
+The buttons are disabled during Run or a simulation request and whenever the
+corresponding history is empty. Reset and accepted input changes clear stale
+activity exports; rejected inputs preserve them. Downloading does not advance
+or reset the simulation. The existing **Download results (JSON)** button continues
+to export the entire displayed snapshot.

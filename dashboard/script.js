@@ -116,6 +116,7 @@ processForm.addEventListener("submit", function (event) {
 // Rebuild the table using the current processes.
 function renderProcessTable() {
     renderReferenceEditor();
+    renderFileRequestEditor();
     processTableBody.replaceChildren();
 
     if (processes.length === 0) {
@@ -273,7 +274,10 @@ processFileInput.addEventListener("change", async function () {
                     process.memory_references === undefined ? {} : process.memory_references,
                     process.burst_time
                 ),
-                file_requests: process.file_requests || {}
+                file_requests: validateFileRequests(
+                    process.file_requests === undefined ? {} : process.file_requests,
+                    process.burst_time
+                )
             });
         });
 
@@ -343,7 +347,10 @@ function collectSimulationInput() {
                 process.memory_references === undefined ? {} : process.memory_references,
                 process.burst_time
             ),
-            file_requests: process.file_requests || {}
+            file_requests: validateFileRequests(
+                process.file_requests === undefined ? {} : process.file_requests,
+                process.burst_time
+            )
         };
     });
 
@@ -389,6 +396,7 @@ function inputChanged() {
     started = false;
     savedInput = "";
     resultsJson = "";
+    updateManagerExportButtons();
     for (const {element, initial} of initialResultDisplays) {
         element.replaceChildren(...Array.from(initial.childNodes, node => node.cloneNode(true)));
         element.hidden = initial.hidden;
@@ -404,7 +412,8 @@ let lockedWorkloadControls = [];
 function lockWorkloadEditing() {
     lockedWorkloadControls = Array.from(document.querySelectorAll(
         "#process input, #process select, #process-form button, #process-table-body button, " +
-        "#memory input, #memory select, #memory button"
+        "#memory input, #memory select, #memory button, " +
+        "#file-request-form input, #file-request-form textarea, #file-request-form select, #file-request-form button, #file-request-table-body button"
     ), control => ({control, disabled: control.disabled}));
     for (const {control} of lockedWorkloadControls) control.disabled = true;
 }
@@ -452,6 +461,7 @@ function showResults(result) {
     renderMemoryManager(result);
     renderFileManager(result);
     resultsJson = JSON.stringify(result, null, 4);
+    updateManagerExportButtons();
     document.getElementById("export-results-button").disabled = false;
 
     const completed = result.processes.filter(function (process) {
@@ -507,20 +517,7 @@ function exportResults() {
     if (!resultsJson) return;
 
     try {
-        const file = new Blob([resultsJson + "\n"], {
-            type: "application/json"
-        });
-        const url = URL.createObjectURL(file);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "simulation-results.json";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        // Allow the browser to begin downloading before releasing the URL.
-        setTimeout(function () {
-            URL.revokeObjectURL(url);
-        }, 1000);
+        downloadText("simulation-results.json", resultsJson + "\n", "application/json");
     } catch (error) {
         simulationError.textContent = "Export failed: " + error.message;
     }
@@ -543,6 +540,11 @@ async function startSimulation() {
         notice.scrollIntoView({block: "start"});
         return false;
     }
+    if (fileRequestValidationActive && !validateFileRequestFields()) {
+        showPage("file", document.querySelector("button[onclick*=\"'file'\"]"));
+        document.querySelector('#file-request-form [aria-invalid="true"]')?.focus();
+        return false;
+    }
     const input = collectSimulationInput();
     const text = JSON.stringify(input);
     lockWorkloadEditing();
@@ -563,6 +565,7 @@ async function stepSimulation() {
     if (running || busy) return;
 
     busy = true;
+    updateManagerExportButtons();
     simulationError.textContent = "";
 
     try {
@@ -574,6 +577,7 @@ async function stepSimulation() {
     } finally {
         busy = false;
         unlockWorkloadEditing();
+        updateManagerExportButtons();
     }
 }
 
@@ -583,6 +587,7 @@ async function runSimulation() {
     if (running || busy) return;
 
     busy = true;
+    updateManagerExportButtons();
     simulationError.textContent = "";
 
     try {
@@ -604,6 +609,7 @@ async function runSimulation() {
         running = false;
         busy = false;
         unlockWorkloadEditing();
+        updateManagerExportButtons();
         document.getElementById("pause-button").disabled = true;
     }
 }
@@ -624,6 +630,7 @@ async function resetSimulation() {
     }
 
     busy = true;
+    updateManagerExportButtons();
     simulationError.textContent = "";
 
     try {
@@ -636,6 +643,7 @@ async function resetSimulation() {
         simulationError.textContent = error.message;
     } finally {
         busy = false;
+        updateManagerExportButtons();
     }
 }
 
@@ -867,15 +875,19 @@ function renderProcessMetrics(result) {
 
 function renderFileManager(results) {
     const container = document.getElementById("file-tree-container");
+    const directoryStates = new Map(Array.from(container.querySelectorAll("details[data-path]"),
+        details => [details.dataset.path, details.open]));
     container.replaceChildren();
 
-    function createTreeNode(node) {
+    function createTreeNode(node, ancestors = []) {
         const item = document.createElement("div");
         item.className = "file-tree-node";
 
         if (node.type === "directory") {
             const details = document.createElement("details");
-            details.open = node.name === "/";
+            const path = [...ancestors, node.name];
+            details.dataset.path = JSON.stringify(path);
+            details.open = directoryStates.get(details.dataset.path) ?? (node.name === "/");
 
             const summary = document.createElement("summary");
             summary.textContent = "📁 " + node.name;
@@ -885,7 +897,7 @@ function renderFileManager(results) {
             children.className = "file-tree-children";
 
             (node.children || []).forEach(function (child) {
-                children.appendChild(createTreeNode(child));
+                children.appendChild(createTreeNode(child, path));
             });
 
             details.appendChild(children);
@@ -914,7 +926,7 @@ function renderFileManager(results) {
     if (events.length === 0) {
         const row = document.createElement("tr");
         const cell = document.createElement("td");
-        cell.colSpan = 4;
+        cell.colSpan = 5;
         cell.textContent = "No file operations recorded yet.";
         row.appendChild(cell);
         tbody.appendChild(row);
@@ -929,9 +941,9 @@ function renderFileManager(results) {
             event.timestamp ?? "—",
             event.entity_id ?? "—",
             event.action ?? "—",
-            event.outcome === "error"
-                ? "Error: " + event.message
-                : "Success" + (event.message ? ": " + event.message : "")
+            event.outcome === "success" ? "Success" : event.outcome === "error" ? "Error" : (event.outcome ?? "Unknown"),
+            event.message === "" || event.message === null || event.message === undefined
+                ? "No output" : event.message
         ];
 
         values.forEach(function (value) {
