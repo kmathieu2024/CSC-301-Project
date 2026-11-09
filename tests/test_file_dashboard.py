@@ -277,3 +277,75 @@ def test_no_process_error_and_multiline_command_preservation(page, dashboard_url
     expect(page.locator("#file-request-command")).to_have_value(command)
     page.locator("#file-request-save").click()
     assert page.evaluate("processes[0].file_requests") == {"0": command}
+
+
+
+def test_new_commands_handles_utf8_storage_and_owner(page, dashboard_url):
+    prepare(page, dashboard_url, burst="9")
+    commands = ["CREATE /notes.txt", "OPEN /notes.txt w+", 'HANDLE_WRITE 1 "caf\u00e9"',
+                "CLOSE 1", 'APPEND /notes.txt "!"', "OPEN /notes.txt r",
+                "HANDLE_READ 2", "CLOSE 2", "STORAGE"]
+    for offset, command in enumerate(commands):
+        add_request(page, offset, command)
+    run(page)
+    log = file_rows(page)
+    assert [row[2] for row in log] == commands
+    assert [row[3] for row in log] == ["Success"] * 9
+    assert [log[i][4] for i in [1, 5, 6, 8]] == ["1", "2", "caf\u00e9!", "6"]
+    expect(page.locator("#file-storage-used")).to_have_text("6")
+    expect(page.locator("#file-tree-container")).to_contain_text("notes.txt (6 bytes) | Owner: P1")
+    expect(page.locator("#file-tree-container summary")).to_contain_text("Owner: system")
+    tab(page, "Process Manager")
+    page.locator("#reset-button").click()
+    page.wait_for_function("busy === false")
+    tab(page, "File Manager")
+    expect(page.locator("#file-storage-used")).to_have_text("6")
+    page.get_by_role("button", name="Remove file request P1 offset 8", exact=True).click()
+    expect(page.locator("#file-storage-used")).to_have_text("\u2014")
+
+
+def test_permission_denial_and_error_prefix_read_use_backend_outcomes(page, dashboard_url):
+    prepare(page, dashboard_url, burst="7")
+    commands = ["CREATE /notes.txt", 'WRITE /notes.txt "Error: legitimate content"',
+                "CHMOD /notes.txt r--", "READ /notes.txt", 'APPEND /notes.txt "denied"',
+                "STAT /notes.txt", "READ /notes.txt"]
+    for offset, command in enumerate(commands):
+        add_request(page, offset, command)
+    run(page)
+    log = file_rows(page)
+    assert [row[3] for row in log] == ["Success", "Success", "Success", "Success", "Error", "Success", "Success"]
+    assert log[3][4] == log[6][4] == "Error: legitimate content"
+    assert "not authorized" in log[4][4].lower()
+    assert "r--" in log[5][4]
+    expect(page.locator("#file-storage-used")).to_have_text(str(len("Error: legitimate content".encode("utf-8"))))
+    # Export preserves the corrected backend outcome even when content starts Error:.
+    import csv
+    with page.expect_download() as download:
+        page.locator("#export-file-csv").click()
+    with open(download.value.path(), encoding="utf-8", newline="") as exported:
+        records = list(csv.DictReader(exported))
+    assert records[3]["outcome"] == "success"
+    assert records[3]["details"] == "Error: legitimate content"
+    assert records[4]["outcome"] == "error"
+
+
+def test_storage_updates_from_partial_snapshots_and_handles_are_closed(page, dashboard_url):
+    prepare(page, dashboard_url)
+    tab(page, "Process Manager")
+    page.locator("#algorithm").select_option("RR")
+    page.locator("#time-quantum").fill("1")
+    tab(page, "File Manager")
+    for offset, command in enumerate(["CREATE /x", 'WRITE /x "\u00e9"', 'APPEND /x "!"', "OPEN /x r", "CLOSE 1", "HANDLE_READ 1"]):
+        add_request(page, offset, command)
+    snapshot = step(page)
+    assert snapshot["file_storage_used"] == 0
+    expect(page.locator("#file-storage-used")).to_have_text("0")
+    for expected in [0, 2, 3]:
+        snapshot = step(page)
+        assert snapshot["file_storage_used"] == expected
+        expect(page.locator("#file-storage-used")).to_have_text(str(expected))
+        if expected != 3:
+            step(page)  # next dispatch snapshot
+    run(page)
+    assert file_rows(page)[5][3] == "Error"
+    assert "closed" in file_rows(page)[5][4].lower()

@@ -171,6 +171,128 @@ function renderProcessTable() {
 const processFileInput = document.getElementById("process-file");
 const uploadStatus = document.getElementById("upload-status");
 
+function loadWorkload(data) {
+    const validAlgorithms = ["FCFS", "SJF", "SRTF", "RR", "PRIORITY"];
+
+    if (data === null || typeof data !== "object" ||
+        Array.isArray(data)) {
+        throw new Error("The file must contain a JSON object.");
+    }
+
+    if (!validAlgorithms.includes(data.algorithm)) {
+        throw new Error(
+            "Algorithm must be FCFS, SJF, SRTF, RR, or PRIORITY."
+        );
+    }
+
+    validateMemoryAssociations(data);
+    const importedMemory = validateMemory(data.memory);
+    const importedConfiguration = data.configuration;
+    if (importedConfiguration !== undefined) {
+        if (!isObject(importedConfiguration)) throw new Error("Configuration must be an object.");
+        for (const [key, minimum] of [["context_switch_cost", 0], ["time_quantum", 1], ["aging_interval", 1]]) {
+            if (importedConfiguration[key] !== undefined &&
+                (!Number.isSafeInteger(importedConfiguration[key]) || importedConfiguration[key] < minimum))
+                throw new Error(key + " must be a whole number of " + minimum + " or greater.");
+        }
+    }
+
+    if (!Array.isArray(data.processes) || data.processes.length === 0) {
+        throw new Error("The file must contain a nonempty processes list.");
+    }
+
+    const uploadedProcesses = [];
+    const usedIds = new Set();
+
+    data.processes.forEach(function (process, index) {
+        const rowLabel = "Process " + (index + 1) + ": ";
+
+        if (process === null || typeof process !== "object" ||
+            Array.isArray(process)) {
+            throw new Error(rowLabel + "must be a process object.");
+        }
+
+        if (typeof process.pid !== "string" ||
+            process.pid.trim() === "") {
+            throw new Error(rowLabel + "ID must be nonempty text.");
+        }
+
+        const pid = process.pid.trim();
+
+        if (usedIds.has(pid)) {
+            throw new Error(rowLabel + "duplicate ID " + pid + ".");
+        }
+
+        if (!Number.isSafeInteger(process.arrival_time) ||
+            process.arrival_time < 0) {
+            throw new Error(
+                rowLabel + "arrival time must be a whole number of 0 or greater."
+            );
+        }
+
+        if (!Number.isSafeInteger(process.burst_time) ||
+            process.burst_time < 1) {
+            throw new Error(
+                rowLabel + "burst time must be a whole number of 1 or greater."
+            );
+        }
+
+        // Match the Python model's default priority when omitted.
+        const priority =
+            process.priority === undefined ? 1 : process.priority;
+
+        if (!Number.isSafeInteger(priority) || priority < 1) {
+            throw new Error(
+                rowLabel + "priority must be a whole number of 1 or greater."
+            );
+        }
+
+        usedIds.add(pid);
+
+        // Keep memory references and file requests from uploaded processes.
+        uploadedProcesses.push({
+            ...process,
+            pid: pid,
+            arrival_time: process.arrival_time,
+            burst_time: process.burst_time,
+            priority: priority,
+            memory_references: validateReferences(
+                process.memory_references === undefined ? {} : process.memory_references,
+                process.burst_time
+            ),
+            file_requests: validateFileRequests(
+                process.file_requests === undefined ? {} : process.file_requests,
+                process.burst_time
+            )
+        });
+    });
+
+    if (!importedMemory.enabled && uploadedProcesses.some(p => Object.keys(p.memory_references).length))
+        throw new Error("Enable memory simulation or remove memory references before importing.");
+    // File reading is asynchronous: do not replace inputs if Run began meanwhile.
+    if (busy) throw new Error("Wait for the simulation to pause before importing.");
+    // Update the dashboard only after every process passes validation.
+    // Clear Add drafts too: they have no fileRequestEdit object for redraw cleanup.
+    cancelFileRequestEdit();
+    applyMemoryConfiguration(importedMemory);
+    if (importedConfiguration) {
+        for (const [key, id] of [["context_switch_cost", "context-switch-cost"], ["time_quantum", "time-quantum"], ["aging_interval", "aging-interval"]]) {
+            if (importedConfiguration[key] !== undefined) document.getElementById(id).value = importedConfiguration[key];
+        }
+    }
+    processes.length = 0;
+
+    uploadedProcesses.forEach(function (process) {
+        processes.push(process);
+    });
+
+    algorithmSelect.value = data.algorithm;
+    updateConfigurationFields();
+    renderProcessTable();
+    inputChanged();
+
+}
+
 processFileInput.addEventListener("change", async function () {
     const file = processFileInput.files[0];
 
@@ -186,122 +308,7 @@ processFileInput.addEventListener("change", async function () {
         const fileText = await file.text();
         const data = parseInputJson(fileText);
 
-        const validAlgorithms = ["FCFS", "SJF", "SRTF", "RR", "PRIORITY"];
-
-        if (data === null || typeof data !== "object" ||
-            Array.isArray(data)) {
-            throw new Error("The file must contain a JSON object.");
-        }
-
-        if (!validAlgorithms.includes(data.algorithm)) {
-            throw new Error(
-                "Algorithm must be FCFS, SJF, SRTF, RR, or PRIORITY."
-            );
-        }
-
-        validateMemoryAssociations(data);
-        const importedMemory = validateMemory(data.memory);
-        const importedConfiguration = data.configuration;
-        if (importedConfiguration !== undefined) {
-            if (!isObject(importedConfiguration)) throw new Error("Configuration must be an object.");
-            for (const [key, minimum] of [["context_switch_cost", 0], ["time_quantum", 1], ["aging_interval", 1]]) {
-                if (importedConfiguration[key] !== undefined &&
-                    (!Number.isSafeInteger(importedConfiguration[key]) || importedConfiguration[key] < minimum))
-                    throw new Error(key + " must be a whole number of " + minimum + " or greater.");
-            }
-        }
-
-        if (!Array.isArray(data.processes) || data.processes.length === 0) {
-            throw new Error("The file must contain a nonempty processes list.");
-        }
-
-        const uploadedProcesses = [];
-        const usedIds = new Set();
-
-        data.processes.forEach(function (process, index) {
-            const rowLabel = "Process " + (index + 1) + ": ";
-
-            if (process === null || typeof process !== "object" ||
-                Array.isArray(process)) {
-                throw new Error(rowLabel + "must be a process object.");
-            }
-
-            if (typeof process.pid !== "string" ||
-                process.pid.trim() === "") {
-                throw new Error(rowLabel + "ID must be nonempty text.");
-            }
-
-            const pid = process.pid.trim();
-
-            if (usedIds.has(pid)) {
-                throw new Error(rowLabel + "duplicate ID " + pid + ".");
-            }
-
-            if (!Number.isSafeInteger(process.arrival_time) ||
-                process.arrival_time < 0) {
-                throw new Error(
-                    rowLabel + "arrival time must be a whole number of 0 or greater."
-                );
-            }
-
-            if (!Number.isSafeInteger(process.burst_time) ||
-                process.burst_time < 1) {
-                throw new Error(
-                    rowLabel + "burst time must be a whole number of 1 or greater."
-                );
-            }
-
-            // Match the Python model's default priority when omitted.
-            const priority =
-                process.priority === undefined ? 1 : process.priority;
-
-            if (!Number.isSafeInteger(priority) || priority < 1) {
-                throw new Error(
-                    rowLabel + "priority must be a whole number of 1 or greater."
-                );
-            }
-
-            usedIds.add(pid);
-
-            // Keep memory references and file requests from uploaded processes.
-            uploadedProcesses.push({
-                ...process,
-                pid: pid,
-                arrival_time: process.arrival_time,
-                burst_time: process.burst_time,
-                priority: priority,
-                memory_references: validateReferences(
-                    process.memory_references === undefined ? {} : process.memory_references,
-                    process.burst_time
-                ),
-                file_requests: validateFileRequests(
-                    process.file_requests === undefined ? {} : process.file_requests,
-                    process.burst_time
-                )
-            });
-        });
-
-        if (!importedMemory.enabled && uploadedProcesses.some(p => Object.keys(p.memory_references).length))
-            throw new Error("Enable memory simulation or remove memory references before importing.");
-        // File reading is asynchronous: do not replace inputs if Run began meanwhile.
-        if (busy) throw new Error("Wait for the simulation to pause before importing.");
-        // Update the dashboard only after every process passes validation.
-        applyMemoryConfiguration(importedMemory);
-        if (importedConfiguration) {
-            for (const [key, id] of [["context_switch_cost", "context-switch-cost"], ["time_quantum", "time-quantum"], ["aging_interval", "aging-interval"]]) {
-                if (importedConfiguration[key] !== undefined) document.getElementById(id).value = importedConfiguration[key];
-            }
-        }
-        processes.length = 0;
-
-        uploadedProcesses.forEach(function (process) {
-            processes.push(process);
-        });
-
-        algorithmSelect.value = data.algorithm;
-        updateConfigurationFields();
-        renderProcessTable();
-        inputChanged();
+        loadWorkload(data);
 
         uploadStatus.textContent =
             "Loaded " + processes.length + " processes from " + file.name + ".";
@@ -389,14 +396,16 @@ let resultsJson = "";
 const initialResultDisplays = Array.from(document.querySelectorAll(
     ".simulation-results .metric p, #process-metrics-body, #gantt-chart, #gantt-empty, " +
     "#memory .metric p, #memory-frame-grid, #memory-mapping-body, #memory-history-body, " +
-    "#memory-transition-body, #file-tree-container, #file-activity-body"
+    "#memory-transition-body, #file-storage-used, #file-tree-container, #file-activity-body"
 ), element => ({element, initial: element.cloneNode(true)}));
 
 function inputChanged() {
+    clearManagerTestMode();
     started = false;
     savedInput = "";
     resultsJson = "";
     updateManagerExportButtons();
+    updateManagerTestButtons();
     for (const {element, initial} of initialResultDisplays) {
         element.replaceChildren(...Array.from(initial.childNodes, node => node.cloneNode(true)));
         element.hidden = initial.hidden;
@@ -462,6 +471,7 @@ function showResults(result) {
     renderFileManager(result);
     resultsJson = JSON.stringify(result, null, 4);
     updateManagerExportButtons();
+    updateManagerTestButtons();
     document.getElementById("export-results-button").disabled = false;
 
     const completed = result.processes.filter(function (process) {
@@ -470,6 +480,7 @@ function showResults(result) {
 
     const total = result.processes.length;
     const finished = total > 0 && completed === total;
+    renderManagerTestResult(result, finished);
     document.getElementById("step-button").disabled = finished;
 
     simulationStatus.textContent =
@@ -545,6 +556,12 @@ async function startSimulation() {
         document.querySelector('#file-request-form [aria-invalid="true"]')?.focus();
         return false;
     }
+    if (activeManagerTest && managerTestFinished) {
+        // Every completed scenario retry starts with a new engine/file system.
+        started = false;
+        savedInput = "";
+        clearManagerTestVerdict();
+    }
     const input = collectSimulationInput();
     const text = JSON.stringify(input);
     lockWorkloadEditing();
@@ -566,6 +583,7 @@ async function stepSimulation() {
 
     busy = true;
     updateManagerExportButtons();
+    updateManagerTestButtons();
     simulationError.textContent = "";
 
     try {
@@ -578,6 +596,7 @@ async function stepSimulation() {
         busy = false;
         unlockWorkloadEditing();
         updateManagerExportButtons();
+        updateManagerTestButtons();
     }
 }
 
@@ -588,6 +607,7 @@ async function runSimulation() {
 
     busy = true;
     updateManagerExportButtons();
+    updateManagerTestButtons();
     simulationError.textContent = "";
 
     try {
@@ -610,6 +630,7 @@ async function runSimulation() {
         busy = false;
         unlockWorkloadEditing();
         updateManagerExportButtons();
+        updateManagerTestButtons();
         document.getElementById("pause-button").disabled = true;
     }
 }
@@ -631,11 +652,17 @@ async function resetSimulation() {
 
     busy = true;
     updateManagerExportButtons();
+    updateManagerTestButtons();
     simulationError.textContent = "";
 
     try {
         if (started) {
             showResults(await sendRequest("reset"));
+            if (activeManagerTest) {
+                // Reset still preserves files; the next scenario attempt is fresh.
+                started = false;
+                savedInput = "";
+            }
         } else {
             simulationStatus.textContent = "Simulation not started.";
         }
@@ -644,6 +671,7 @@ async function resetSimulation() {
     } finally {
         busy = false;
         updateManagerExportButtons();
+        updateManagerTestButtons();
     }
 }
 
@@ -874,6 +902,8 @@ function renderProcessMetrics(result) {
 // Display the file system tree and file operation history.
 
 function renderFileManager(results) {
+    // Use the snapshot's aggregate metric, never an estimate from inputs or DOM.
+    document.getElementById("file-storage-used").textContent = results.file_storage_used ?? "\u2014";
     const container = document.getElementById("file-tree-container");
     const directoryStates = new Map(Array.from(container.querySelectorAll("details[data-path]"),
         details => [details.dataset.path, details.open]));
@@ -890,7 +920,7 @@ function renderFileManager(results) {
             details.open = directoryStates.get(details.dataset.path) ?? (node.name === "/");
 
             const summary = document.createElement("summary");
-            summary.textContent = "📁 " + node.name;
+            summary.textContent = "📁 " + node.name + (node.owner == null ? "" : " | Owner: " + node.owner);
             details.appendChild(summary);
 
             const children = document.createElement("div");
@@ -904,7 +934,7 @@ function renderFileManager(results) {
             item.appendChild(details);
         } else {
             item.textContent = "📄 " + node.name +
-                " (" + node.size + " bytes)";
+                " (" + node.size + " bytes)" + (node.owner == null ? "" : " | Owner: " + node.owner);
         }
 
         return item;

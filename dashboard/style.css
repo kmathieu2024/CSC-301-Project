@@ -538,3 +538,8 @@ input[aria-invalid="true"] {
 #file-request-table-body td:nth-child(3), #file-activity-body td:last-child {
     white-space: pre-wrap;
 }
+
+
+.manager-test-controls { margin-bottom: 24px; }
+.manager-test-controls .test-pass { color: #166534; font-weight: bold; }
+.manager-test-controls .test-fail { color: #b42318; font-weight: bold; }

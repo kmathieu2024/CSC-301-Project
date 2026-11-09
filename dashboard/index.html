@@ -295,6 +295,20 @@
 
 <div id="memory" class="page">
     <h1>Memory Manager</h1>
+    <section class="card manager-test-controls">
+        <h2>Memory Test Scenario</h2>
+        <div class="control-buttons">
+            <button id="load-memory-test" type="button" aria-describedby="memory-test-note">Load Test Scenario</button>
+        </div>
+        <p id="memory-test-note">Replaces the current workload and clears previous results. Use Run or Step in Process Manager to execute it.</p>
+        <p id="memory-test-status" role="status"></p>
+        <div id="memory-test-results" class="table-container" hidden>
+            <table class="process-table" aria-label="Memory test checks">
+                <thead><tr><th scope="col">Check</th><th scope="col">Expected</th><th scope="col">Actual</th><th scope="col">Pass / Fail</th></tr></thead>
+                <tbody id="memory-test-body"></tbody>
+            </table>
+        </div>
+    </section>
     <p id="memory-start-error" tabindex="-1" class="field-error memory-notice" role="alert" hidden></p>
     <section class="card">
         <h2>Memory Configuration</h2>
@@ -484,6 +498,20 @@
 
 <div id="file" class="page">
     <h1>File Manager</h1>
+    <section class="card manager-test-controls">
+        <h2>File Test Scenario</h2>
+        <div class="control-buttons">
+            <button id="load-file-test" type="button" aria-describedby="file-test-note">Load Test Scenario</button>
+        </div>
+        <p id="file-test-note">Replaces the current workload and clears previous results. Use Run or Step in Process Manager to execute it.</p>
+        <p id="file-test-status" role="status"></p>
+        <div id="file-test-results" class="table-container" hidden>
+            <table class="process-table" aria-label="File test checks">
+                <thead><tr><th scope="col">Check</th><th scope="col">Expected</th><th scope="col">Actual</th><th scope="col">Pass / Fail</th></tr></thead>
+                <tbody id="file-test-body"></tbody>
+            </table>
+        </div>
+    </section>
     <p>Explore the simulated file system and review file operations.</p>
 
     <section class="card">
@@ -516,6 +544,23 @@
         <code>DELETE /docs/notes.txt</code>, <code>RMDIR /docs</code>, <code>LS /</code>,
         <code>CD /docs</code>, <code>PWD</code>, <code>STAT /docs</code>.
         Operation errors are recorded in the activity log; each process has its own working directory in the shared file tree.</p>
+        <details class="file-command-help">
+            <summary>Append, file handles, permissions, and storage commands</summary>
+            <ul>
+                <li><code>APPEND /docs/notes.txt " more text"</code> adds content.</li>
+                <li><code>OPEN /docs/notes.txt r</code> opens an existing file and returns a handle in the activity log.
+                Modes: <code>r</code>, <code>w</code>, <code>a</code>, <code>r+</code>, <code>w+</code>, <code>a+</code>.
+                Modes beginning with <code>w</code> truncate the file.</li>
+                <li><code>HANDLE_READ 1</code>, <code>HANDLE_WRITE 1 "text"</code>, and <code>CLOSE 1</code>
+                use the returned handle. The number 1 is an example; handles belong to the current simulation.
+                Requests use literal handle numbers, without automatic substitution.
+                Reset preserves handle state; use a fresh simulation when a script relies on numbering starting at 1.</li>
+                <li><code>CHMOD /docs/notes.txt r--</code> changes the shared permission mask.
+                The creating process PID is the owner; only that owner can change permissions through process requests.</li>
+                <li><code>STORAGE</code> returns the total UTF-8 bytes of file contents.
+                <code>STAT /docs/notes.txt</code> returns metadata, including permissions.</li>
+            </ul>
+        </details>
         <div class="table-container">
             <table class="process-table" aria-label="Configured file requests">
                 <thead><tr><th scope="col">PID</th><th scope="col">CPU offset</th><th scope="col">Command</th><th scope="col">Actions</th></tr></thead>
@@ -526,6 +571,12 @@
 
     <section class="card">
         <h2>File System Tree</h2>
+        <div class="metric-grid">
+            <div class="metric">
+                <h3>Stored File Content (UTF-8 bytes)</h3>
+                <p id="file-storage-used">&#8212;</p>
+            </div>
+        </div>
         <p>Expand directories to view their files and subdirectories.</p>
         <div id="file-tree-container">
             <p>Start a simulation to view the file system.</p>
@@ -601,6 +652,7 @@
     <script src="memory-results.js"></script>
     <script src="script.js"></script>
     <script src="manager-exports.js"></script>
+    <script src="manager-tests.js"></script>
     <script src="memory-input.js"></script>
     <script src="file-input.js"></script>
 

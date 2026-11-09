@@ -581,8 +581,9 @@ process can have one command per offset. Use Edit, Save Request, Cancel Edit, or
 Remove in the request table. Commands, including quoted text and spaces, are
 preserved; command syntax and operation errors are reported when executed.
 
-Supported commands are `CREATE`, `WRITE`, `READ`, `DELETE`, `MKDIR`, `RMDIR`,
-`LS`, `CD`, `PWD`, and `STAT`. For example, upload this workload in Process Manager:
+Supported commands are `CREATE`, `WRITE`, `APPEND`, `READ`, `DELETE`, `MKDIR`,
+`RMDIR`, `LS`, `CD`, `PWD`, `STAT`, `OPEN`, `CLOSE`, `HANDLE_READ`, `HANDLE_WRITE`,
+`CHMOD`, and `STORAGE`. For example, upload this workload in Process Manager:
 
 ```json
 {
@@ -608,6 +609,26 @@ Processes share one file tree but have separate working directories, initially
 `/`. `CD /docs` changes only the requesting process's working directory; absolute
 paths let another process access the same files. Requests without a `file_requests`
 map default to none. Invalid imports and edits leave valid inputs and results intact.
+
+`APPEND /docs/notes.txt " more text"` adds content to an existing file.
+`OPEN /docs/notes.txt r` returns a handle in the activity log; use that number in
+`HANDLE_READ`, `HANDLE_WRITE`, and `CLOSE` requests. Modes are `r`, `w`, `a`,
+`r+`, `w+`, and `a+`; modes starting with `w` truncate existing content. Create
+the file before opening it. Handle numbers belong to the current simulation;
+requests use literal numbers, without automatic substitution of OPEN results.
+Reset preserves handle state as well as files; use a fresh simulation for scripts
+that rely on handle numbering starting at 1.
+
+The tree shows recorded owners and UTF-8 file sizes. The Stored File Content
+metric shows the aggregate UTF-8 bytes from the displayed snapshot; Reset keeps
+this storage because it preserves files, while input changes clear the display.
+`STORAGE` also returns the byte count in the activity log. Process-created entries
+are owned by the creating PID. `CHMOD /docs/notes.txt r--` changes the shared
+permission mask, and only its owner can change it through process commands.
+`STAT` returns metadata, including permissions. The mask is one shared class,
+not separate owner/group/other permissions. Operation outcomes come directly
+from the backend, including successful reads whose content starts with `Error:`.
+
 
 Reset restarts process execution and clears the activity history while preserving
 the file tree and working directories. Repeating CREATE or MKDIR after Reset can
@@ -636,3 +657,21 @@ corresponding history is empty. Reset and accepted input changes clear stale
 activity exports; rejected inputs preserve them. Downloading does not advance
 or reset the simulation. The existing **Download results (JSON)** button continues
 to export the entire displayed snapshot.
+
+
+## Manager test scenarios
+
+Memory Manager and File Manager each provide **Load Test Scenario**. Loading
+replaces the workload and clears previous results without starting execution.
+Use Run or Step in Process Manager; an Expected / Actual / Pass-Fail table appears
+in the matching tab only after completion. Partial runs have no final verdict.
+
+The memory scenario expects 5 references, 2 hits, 3 faults, and 1 eviction with
+FIFO, 2 frames, and 4-byte pages. The file scenario creates `/demo/notes.txt`,
+writes and reads `Hello OS`, then deliberately reads `/missing.txt`; the reported
+missing-file error is an expected passing check.
+
+Reset clears the verdict. Repeating a completed scenario or running it after
+Reset starts a fresh simulation, so preserved files cannot affect its checks.
+Normal Reset behavior still preserves files. Accepted edits or imports leave
+test mode; ordinary workloads do not receive test verdicts.
