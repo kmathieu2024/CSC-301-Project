@@ -346,3 +346,32 @@ def check_memory_trace(memory, process, addresses, expectedResults):
             if resident is not None:
                 pid, page = resident
                 assert memory.page_tables[pid][page] == frameNumber
+
+
+def test_optimal_uses_future_references_and_replays():
+    process = Process("P1", 0, 1)
+    pages = [1, 2, 3, 1, 2, 3]
+    trace = [("P1", page) for page in pages]
+    memory = MemoryManager(2, algorithm="optimal", reference_trace=trace)
+    for _ in range(2):
+        results = [memory.reference(process, page) for page in pages]
+        assert results[2].evicted == ("P1", 2)
+        assert memory.metrics()["faults"] == 4
+        memory.reset()
+
+
+def test_optimal_trace_validation_and_protected_frames():
+    process = Process("P1", 0, 1)
+    with pytest.raises(ValueError):
+        MemoryManager(2, algorithm="optimal")
+    memory = MemoryManager(2, algorithm="optimal", reference_trace=[("P1", 1), ("P1", 2), ("P1", 3)])
+    with pytest.raises(ValueError):
+        memory.reference(process, 2)
+    memory.reference(process, 1)
+    memory.reference(process, 2)
+    memory.protect(process, 1)
+    memory.protect(process, 2)
+    with pytest.raises(NoFrameAvailable):
+        memory.reference(process, 3)
+    memory.unprotect(process, 2)
+    assert memory.reference(process, 3).evicted == ("P1", 2)

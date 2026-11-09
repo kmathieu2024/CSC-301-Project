@@ -19,18 +19,34 @@ class Translation:
 
 
 class MemoryManager:
-    """Global demand-paged memory with FIFO or LRU replacement."""
+    """Global demand-paged memory with FIFO, LRU, or optimal replacement.
 
-    def __init__(self, frame_count, page_size=1, algorithm="fifo", fault_latency=0):
+    Optimal replacement requires the complete ordered (pid, address) trace.
+    Each successful reference must match its next entry; reset replays it.
+    Ties are resolved by frame order."""
+
+    def __init__(self, frame_count, page_size=1, algorithm="fifo", fault_latency=0, reference_trace=None):
         for name, value in (("frame_count", frame_count), ("page_size", page_size)):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
-        if not isinstance(algorithm, str) or algorithm.lower() not in ("fifo", "lru"):
-            raise ValueError("algorithm must be fifo or lru")
+        if not isinstance(algorithm, str) or algorithm.lower() not in ("fifo", "lru", "optimal"):
+            raise ValueError("algorithm must be fifo, lru, or optimal")
         if isinstance(fault_latency, bool) or not isinstance(fault_latency, (int, float)) or not 0 <= fault_latency < float('inf'):
             raise ValueError("fault_latency must be a finite nonnegative number")
         self.frame_count, self.page_size = frame_count, page_size
         self.algorithm, self.fault_latency = algorithm.lower(), fault_latency
+        if self.algorithm == "optimal":
+            if reference_trace is None:
+                raise ValueError("optimal requires a complete reference_trace")
+            self._trace = tuple(reference_trace)
+            for entry in self._trace:
+                if (not isinstance(entry, (tuple, list)) or len(entry) != 2
+                        or isinstance(entry[1], bool) or not isinstance(entry[1], int)
+                        or entry[1] < 0):
+                    raise ValueError("trace entries must be (pid, nonnegative address) pairs")
+            self._trace = tuple((pid, address) for pid, address in self._trace)
+        else:
+            self._trace = ()
         self.reset()
 
     def reset(self):
@@ -40,6 +56,7 @@ class MemoryManager:
         self._used = {}
         self._protected = set()
         self._clock = 0
+        self._trace_index = 0
         self.hits = self.faults = self.evictions = 0
 
     def reference(self, process, address):
@@ -48,11 +65,16 @@ class MemoryManager:
         pid = process.pid
         page, offset = divmod(address, self.page_size)
         key = (pid, page)
+        if self.algorithm == "optimal" and (self._trace_index >= len(self._trace)
+                or self._trace[self._trace_index] != (pid, address)):
+            raise ValueError("reference does not match the next optimal trace entry")
         table = self.page_tables.setdefault(pid, {})
         if page not in table and None not in self.frames and all(
                 frame in self._protected for frame in self.frames):
             raise NoFrameAvailable()
         self._clock += 1
+        if self.algorithm == "optimal":
+            self._trace_index += 1
         evicted = None
         fault = page not in table
         if fault:
@@ -60,8 +82,15 @@ class MemoryManager:
             if None in self.frames:
                 frame = self.frames.index(None)
             else:
-                order = self._loaded if self.algorithm == "fifo" else self._used
-                evicted = min((key for key in order if key not in self._protected), key=order.get)
+                if self.algorithm == "optimal":
+                    future = {}
+                    for index, (future_pid, future_address) in enumerate(self._trace[self._trace_index:]):
+                        future.setdefault((future_pid, future_address // self.page_size), index)
+                    candidates = (key for key in self.frames if key not in self._protected)
+                    evicted = max(candidates, key=lambda key: future.get(key, float("inf")))
+                else:
+                    order = self._loaded if self.algorithm == "fifo" else self._used
+                    evicted = min((key for key in order if key not in self._protected), key=order.get)
                 frame = self.page_tables[evicted[0]].pop(evicted[1])
                 del self._loaded[evicted]
                 del self._used[evicted]
