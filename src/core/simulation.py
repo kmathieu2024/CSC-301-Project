@@ -352,10 +352,12 @@ class SimulationEngine:
                     command = process.file_requests[executed]
                     result = self.file_manager.execute_command(
                         command,
-                        process_id=process.pid
+                        process_id=process.pid,
+                        user=process.pid,
                     )
 
-                    failed = isinstance(result, str) and result.startswith("Error:")
+                    failed = (isinstance(result, str) and result.startswith("Error:")
+                              and getattr(self.file_manager, "_last_command_failed", True))
 
                     self.events.append({
                         "timestamp": self.current_time,
@@ -703,6 +705,7 @@ class SimulationEngine:
                 for index, entry in enumerate(self.memory_manager.frames)
             ] if self.memory_manager is not None else [],
             "file_tree": self.get_file_tree(),
+            "file_storage_used": self.file_manager.storage_used(),
             "algorithm": self.algorithm,
             "current_time": self.current_time,
             "seed": self.seed,
