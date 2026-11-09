@@ -405,7 +405,7 @@ def test_file_command_script_matches_expected_results():
             errors += 1
         elif command.startswith("STAT"):
             assert result.size == expectedResult, "Metadata size is incorrect"
-            assert result.owner == "system"
+            assert result.owner == "demo"
             successful += 1
         else:
             assert result == expectedResult, "Command response is incorrect"
@@ -446,7 +446,6 @@ def test_required_rm_command():
     assert fs.list_directory("/") == []
 
 
-@pytest.mark.xfail(strict=True, reason="M3-F01: append command is missing")
 def test_required_append_command():
     fs = FileManager()
     fs.create_file("/notes.txt", "Hello")
@@ -491,7 +490,6 @@ def test_broken_authorizer_does_not_allow_a_write():
     assert snapshot_tree(fs._root) == before
 
 
-@pytest.mark.xfail(strict=True, reason="M3-BYTES: file size counts characters, not UTF-8 bytes")
 def test_file_size_counts_encoded_bytes():
     fs = FileManager()
     fs.create_file("/notes.txt", "é")
@@ -556,3 +554,72 @@ def test_bad_write_content_keeps_the_original_file():
     with pytest.raises(TypeError):
         fs.write_file("/notes.txt", 12)
     assert snapshot_tree(fs._root) == before
+
+
+def test_storage_used_counts_utf8_bytes_across_files():
+    fs = FileManager()
+    fs.create_file("/one.txt", "é")
+    fs.make_directory("/docs")
+    fs.create_file("/docs/two.txt", "🙂")
+    assert fs.storage_used() == len("é🙂".encode("utf-8"))
+    assert fs.execute_command("STORAGE") == fs.storage_used()
+
+
+def test_permissions_mask_is_enforced():
+    fs = FileManager()
+    fs.create_file("/private.txt", "secret")
+    fs._resolve("/private.txt").metadata.permissions = "r--"
+    assert fs.read_file("/private.txt") == "secret"
+    with pytest.raises(AuthorizationError):
+        fs.write_file("/private.txt", "changed")
+
+
+def test_open_close_modes_and_invalid_handles():
+    fs = FileManager()
+    fs.create_file("/data.txt", "hello")
+    read_handle = fs.open_file("/data.txt", "r")
+    assert fs.read_open_file(read_handle) == "hello"
+    with pytest.raises(AuthorizationError):
+        fs.write_open_file(read_handle, "!")
+    fs.close_file(read_handle)
+    with pytest.raises(FileSystemError):
+        fs.read_open_file(read_handle)
+
+    append_handle = fs.open_file("/data.txt", "a")
+    fs.write_open_file(append_handle, " world")
+    fs.close_file(append_handle)
+    assert fs.read_file("/data.txt") == "hello world"
+
+    truncate_handle = fs.open_file("/data.txt", "w")
+    fs.write_open_file(truncate_handle, "fresh")
+    fs.close_file(truncate_handle)
+    assert fs.read_file("/data.txt") == "fresh"
+
+
+def test_open_rejects_invalid_modes_and_missing_permissions():
+    fs = FileManager()
+    fs.create_file("/locked.txt", "secret")
+    fs._resolve("/locked.txt").metadata.permissions = "r--"
+    with pytest.raises(ValueError):
+        fs.open_file("/locked.txt", "x")
+    with pytest.raises(AuthorizationError):
+        fs.open_file("/locked.txt", "w")
+
+
+def test_chmod_command_updates_and_enforces_permissions():
+    fs = FileManager()
+    fs.create_file("/private.txt", "secret")
+    assert fs.execute_command("CHMOD /private.txt r--") is None
+    assert fs.get_metadata("/private.txt").permissions == "r--"
+    with pytest.raises(AuthorizationError):
+        fs.write_file("/private.txt", "changed")
+
+
+def test_open_close_command_interface():
+    fs = FileManager()
+    fs.create_file("/handle.txt", "hello")
+    handle = fs.execute_command("OPEN /handle.txt r")
+    assert isinstance(handle, int)
+    assert fs.execute_command(f"HANDLE_READ {handle}") == "hello"
+    assert fs.execute_command(f"CLOSE {handle}") is None
+    assert fs.execute_command(f"CLOSE {handle}").startswith("Error:")

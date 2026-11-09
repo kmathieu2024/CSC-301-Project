@@ -135,7 +135,11 @@ in memory and are reset when a new `FileManager` instance is created.
 - Create and remove directories; directories must be empty before removal.
 - List directory contents and change the current working directory.
 - Retrieve file and directory metadata, including creation, modification, and
-  access timestamps, owner, size, and permissions.
+  access timestamps, owner, size (UTF-8 bytes), and permissions.
+- Open and close files using integer handles and explicit read/write/append modes.
+- Report aggregate file-content storage with `storage_used()` or `STORAGE`.
+- Enforce the stored three-character `rwx` mask; the mask is a simple shared
+  permission class applied to requests, while `owner` records the creator identity.
 - Maintain a separate current working directory for each process while sharing
   the same file and directory tree. Pass a `process_id` to use a process-specific
   working directory. Omitting it uses the default context for compatibility.
@@ -205,6 +209,13 @@ with `/` are resolved from the file system root.
 | `CD` | `CD /home/P1` | Change the working directory. |
 | `PWD` | `PWD` | Display the working directory. |
 | `STAT` | `STAT notes.txt` | Return file or directory metadata. |
+| `APPEND` | `APPEND notes.txt " more"` | Append text to a file. |
+| `OPEN` | `OPEN notes.txt r` | Open a file and return a handle. Modes: `r`, `w`, `a`, `r+`, `w+`, `a+`. |
+| `CLOSE` | `CLOSE 1` | Close an open handle. |
+| `HANDLE_READ` | `HANDLE_READ 1` | Read through an open handle. |
+| `HANDLE_WRITE` | `HANDLE_WRITE 1 "more"` | Write through an open handle. |
+| `CHMOD` | `CHMOD notes.txt rw-` | Set the three-character permission mask. |
+| `STORAGE` | `STORAGE` | Return aggregate UTF-8 bytes used by all files. |
 
 Pass the process ID separately when executing a command:
 
