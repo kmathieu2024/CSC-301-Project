@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from src.managers.file import (
@@ -366,7 +368,7 @@ def test_file_command_script_matches_expected_results():
 
     # Each row contains a command, expected response, and expected tree.
     # Error: entries specify the expected error-message text.
-    commands = [
+    expectedSteps = [
         ("MKDIR /docs", None, docsTree),
         ("CREATE /docs/notes.txt", None, emptyFileTree),
         ('WRITE /docs/notes.txt "Hello OS"', "", writtenTree),
@@ -390,12 +392,22 @@ def test_file_command_script_matches_expected_results():
         ("RMDIR /docs", None, emptyTree),
         ("LS /", [], emptyTree),
     ]
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "test_data" / "milestone3" / "fs_script_current.txt"
+    )
+    commands = script.read_text(encoding="utf-8").splitlines()
+    assert len(commands) == len(expectedSteps) == 22
+
     fs = FileManager()
     successful = 0
     errors = 0
 
     # Run all 22 commands, continuing after deliberate error cases.
-    for command, expectedResult, expectedTree in commands:
+    for command, (expectedCommand, expectedResult, expectedTree) in zip(
+        commands, expectedSteps
+    ):
+        assert command == expectedCommand
         result = fs.execute_command(command, process_id="P1", user="demo")
 
         if isinstance(expectedResult, str) and expectedResult.startswith("Error:"):
@@ -414,7 +426,6 @@ def test_file_command_script_matches_expected_results():
         # Check content and hierarchy after every command, not just at the end.
         assert collect_tree(fs._root) == expectedTree, "File tree is incorrect"
 
-    assert len(commands) == 22
     assert successful == 15
     assert errors == 7
     assert fs.list_directory("/") == []

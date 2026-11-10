@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from src.core.process import Process
@@ -58,11 +60,7 @@ def test_fifo_and_lru_same_trace():
 
     # Also check a longer trace, including every frame and eviction.
     # Use the same 12 virtual addresses for both policies.
-    addresses = [
-        0x0040, 0x10A0, 0x0044, 0x20B0,
-        0x0048, 0x30C0, 0x004C, 0x10A4,
-        0x0050, 0x20B4, 0x0054, 0x30C4,
-    ]
+    addresses = read_trace("trace_locality.txt")
 
     # Create the FIFO process and initially empty memory.
     process = Process("P1", 0, 12)
@@ -302,23 +300,42 @@ def test_protected_frame_wait_does_not_count_a_fault():
 
 def test_cyclic_memory_stress_is_reproducible():
     # Cycle through 16 pages using only 3 frames, for 200 references.
-    addresses = []
-    for index in range(200):
-        addresses.append((index % 16) * 4096 + index % 64)
+    addresses = read_trace("trace_stress.txt")
+    assert len(addresses) == 200
 
     for policy in ["fifo", "lru"]:
         process = Process("P1", 0, 200)
         memory = MemoryManager(3, page_size=4096, algorithm=policy)
+        replays = []
 
-        # Both runs should fault on every reference in this cyclic case.
         for _ in range(2):
             memory.reset()
-            for address in addresses:
-                memory.reference(process, address)
-                assert memory.metrics()["used_frames"] <= 3
+            results = []
+            for index, address in enumerate(addresses):
+                result = memory.reference(process, address)
+                expectedEviction = (
+                    None if index < 3 else ("P1", addresses[index - 3] // 4096)
+                )
+                assert result.fault is True
+                assert result.evicted == expectedEviction
+                assert memory.metrics()["used_frames"] == min(index + 1, 3)
+                results.append((result, tuple(memory.frames)))
+
             assert memory.hits == 0
             assert memory.faults == 200
             assert memory.evictions == 197
+            replays.append(results)
+
+        assert replays[0] == replays[1]
+
+
+def read_trace(filename):
+    folder = Path(__file__).resolve().parents[1] / "test_data" / "milestone3"
+    return [
+        int(line.strip(), 0)
+        for line in (folder / filename).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def check_memory_trace(memory, process, addresses, expectedResults):
