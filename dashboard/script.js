@@ -260,6 +260,9 @@ function loadWorkload(data) {
                 process.memory_references === undefined ? {} : process.memory_references,
                 process.burst_time
             ),
+            ...(process.blocking_requests === undefined ? {} : {
+                blocking_requests: validateBlockingRequests(process.blocking_requests, process.burst_time)
+            }),
             file_requests: validateFileRequests(
                 process.file_requests === undefined ? {} : process.file_requests,
                 process.burst_time

@@ -335,6 +335,11 @@ separately from time waiting in the ready queue. Reset clears the results so
 the same requests can be simulated again. Page faults with nonzero latency use
 the same waiting and ready transitions.
 
+Workload JSON can also include `"blocking_requests": {"1": 3}` inside a
+process. Keys are canonical nonnegative integer CPU offsets less than the
+process burst time; durations must be finite positive numbers. The dashboard
+preserves these requests when importing a workload and passes them to the API.
+
 Simulation results include a `dispatch_count` and `preemption_count` for each
 process. Dispatches count each time a process starts or resumes execution;
 preemptions count times it is returned to the ready queue before completion,
