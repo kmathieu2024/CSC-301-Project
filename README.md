@@ -4,9 +4,19 @@
 This project is a Python-based operating system simulator
 developed by a six-member team.
 
-The simulator will model several operating system components,
+The simulator models several operating system components,
 including process management, memory management, file systems,
-security, device management, and networking.
+and parallel computing. Security, device management, and
+networking are planned for subsequent development milestones.
+
+The project uses a Python simulation backend, Flask API,
+and an interactive HTML, CSS, and JavaScript dashboard to
+demonstrate operating system concepts, resource management,
+and system performance.
+
+The simulator supports deterministic process scheduling,
+memory page replacement, file system operations, and
+event-based integration between managers.
 
 ## Team Member Names and Roles
 **Kyla Jones-Atkinson** - Project Lead and Integration <br>
@@ -18,16 +28,30 @@ security, device management, and networking.
 
 ## Project Structure
 - src/: Simulator source code
-- dashboard/: User interface
-- tests/: Automated tests
-- test_data/: Sample inputs and expected outputs
-- docs/: Project documentation
-- designs/: Component design documents
+  - core/: Process models and discrete-event simulation engine
+  - managers/: Operating system manager implementations
+    - process/: CPU scheduling algorithms
+    - memory/: Memory management and page replacement
+    - file/: File system operations
+    - security/: Security Manager (planned)
+    - device/: Device Manager (planned)
+    - network/: Network Manager (planned)
+  - parallel/: Multicore simulation and synchronization demonstrations
+- dashboard/: HTML, CSS, and JavaScript user interface
+- app.py: Flask application and simulation API
+- tests/: Automated unit, integration, and dashboard tests
+- test_parallel.py: Parallel computing tests
+- test_data/: Sample inputs, traces, and expected results
+- docs/: Project documentation and development guidelines
+- .github/workflows/: Automated testing workflow
 
 ## Requirements
 - Python 3.11 or newer
 - pip
+- Flask
 - pytest
+- pytest-playwright (for browser-based tests)
+- Chromium (for Playwright browser tests)
 
 ## Installation
 
@@ -35,13 +59,53 @@ security, device management, and networking.
 2. Open the project in VS Code.
 3. Install dependencies:
 
+   ```bash
    python -m pip install -r requirements.txt
+   ```
+   
+4. To install development and browser-testing dependencies:
+
+   ```bash
+   python -m pip install -r requirements-dev.txt
+   python -m playwright install chromium
+   ```
 
 ## Running Tests
 
-Run:
+Run the main test suite:
 
-   python -m pytest tests/ -v
+```bash
+python -m pytest tests/ -v
+```
+
+Run the parallel computing tests:
+
+```bash
+python -m pytest test_parallel.py -v
+```
+
+Run all tests:
+
+```bash
+python -m pytest -q
+```
+
+GitHub Actions automatically runs the main test suite
+on pushes and pull requests using Python 3.11.
+
+As of November 9, 2026, the latest verified main-branch
+GitHub Actions run reported:
+
+- 163 passed
+- 3 expected failures
+- 0 unexpected failures
+
+The three expected failures concern unsupported file
+command aliases: `mkfile`, `cat`, and `rm`.
+
+These results describe the CI-configured `tests/` suite.
+The separate `test_parallel.py` module is not included
+in that workflow's test command.
 
 ## Development Workflow
 1. Create a branch for your assigned task.
@@ -53,8 +117,47 @@ Run:
 See docs/git_workflow.md for details.
 
 ## Current Status
-Milestone 1: Repository setup, architecture design,
-baseline test cases, and project documentation.
+
+**Milestone 1 - Completed**
+- Established the repository structure and development workflow.
+- Developed the system architecture and manager interfaces.
+- Created the requirements traceability matrix and risk register.
+- Implemented the initial interactive dashboard prototype.
+- Established baseline scenarios and testing documentation.
+
+**Milestone 2 - Completed**
+- Implemented the discrete-event simulation engine.
+- Implemented FCFS, SJF, SRTF, Round Robin, and Priority
+  scheduling with aging.
+- Added configurable quantum and context-switch overhead.
+- Implemented deterministic process arrival and scheduling behavior.
+- Added process state transitions, including blocking and unblocking.
+- Implemented the CPU Gantt chart and process metrics table.
+- Added simulation controls, event logging, and JSON results export.
+- Expanded automated scheduling and simulation tests.
+
+**Milestone 3 - In Progress**
+- Implemented FIFO and LRU memory page replacement.
+- Added configurable memory frames, page size, and fault latency.
+- Integrated page faults with process blocking and unblocking.
+- Implemented the in-memory File Manager and file operations.
+- Added file metadata, ownership, permissions, and storage tracking.
+- Integrated Process, Memory, and File Manager events.
+- Added memory statistics, frame visualization, and file tree
+  displays to the dashboard.
+- Implemented an initial 1-, 2-, and 4-core parallel simulator.
+- Added race-condition and deadlock demonstrations.
+- Expanded automated manager and integration tests.
+- Continuing dashboard input controls, manager comparisons,
+  and visualization improvements.
+
+**Milestone 4 - Planned**
+- Implement the Security, Device, and Network Managers.
+- Integrate all six managers through the simulation engine.
+- Complete the remaining dashboard workspaces.
+- Expand independent manager and system integration testing.
+- Finalize performance experiments, documentation,
+  and project demonstration.
 
 ### Running the Simulation Dashboard
 
@@ -94,6 +197,134 @@ Memory is released when a process terminates. Memory events include the
 translation and any evicted `(pid, page)` pair. `memory.frames`,
 `memory.page_tables`, and `memory.metrics()` expose current state; reset clears
 memory and counters. Simulation reset also resets its memory manager.
+
+#### Memory Manager Status
+
+The Memory Manager currently supports FIFO and LRU page
+replacement, configurable page sizes and frame counts,
+virtual-to-physical address translation, and page-fault
+latency.
+
+Memory references are integrated with process execution.
+Page faults with nonzero latency cause a process to enter
+the WAITING state until its unblock event occurs.
+
+The manager tracks page references, hits, faults,
+evictions, fault rates, and occupied frames.
+
+The dashboard displays memory statistics and physical
+frame allocation. Additional memory input controls and
+visualizations are being developed in the Milestone 3
+dashboard branch.
+
+Optimal page replacement is not implemented on the
+current main branch. A separate implementation was
+proposed in PR #65 but was closed without merging.
+
+#### Memory Manager inputs
+
+In Memory Manager, enable memory simulation and choose FIFO/LRU, frame count,
+page size in bytes, and page-fault latency in simulation time units. Select an
+existing PID to add references; use Edit or Remove on a reference row.
+CPU offsets count time already executed by that process, **not global time**.
+Addresses are virtual byte addresses; page number is `floor(address / page_size)`.
+Offsets must be integers from zero through `burst_time - 1`; addresses must be
+nonnegative integers. Numeric integers must fit JavaScript's safe integer range.
+Latency may be fractional but must be finite and nonnegative.
+
+Upload a JSON file from Process Manager, for example:
+
+```json
+{
+  "algorithm": "FCFS",
+  "configuration": {"context_switch_cost": 0},
+  "memory": {
+    "enabled": true,
+    "frame_count": 3,
+    "page_size": 4,
+    "algorithm": "fifo",
+    "fault_latency": 0
+  },
+  "processes": [
+    {
+      "pid": "P1",
+      "arrival_time": 0,
+      "burst_time": 4,
+      "priority": 1,
+      "memory_references": {"0": 8, "2": 9},
+      "file_requests": {"1": "mkdir /example"}
+    }
+  ]
+}
+```
+
+When `memory` or its optional settings are absent, both dashboard and API use
+memory enabled, 3 frames, 4-byte pages, FIFO (`fifo`), and zero fault latency.
+Missing `memory_references` means no references; missing priority means 1.
+Older process files remain supported. Missing scheduling configuration retains
+current dashboard scheduling controls. Imported configuration values update those
+controls when supplied. Process fields, including `file_requests`, are preserved.
+
+Reference maps belong inside their process, use canonical decimal keys (`"0"`,
+`"1"`, etc.), and cannot contain duplicate keys or offset aliases such as `"01"`.
+The complete import is validated before replacing inputs. Disabling memory keeps
+references visible, but Run/Step are blocked until memory is enabled again or all
+references are explicitly removed. Disabled memory configuration fields retain
+their displayed values for re-enabling.
+
+Accepted input changes clear previous results and disable export. Run or Step
+starts a fresh simulation. Rejected edits and imports preserve existing inputs
+and results. Workload editing is disabled while a simulation is running.
+
+#### Memory Manager results
+
+Frame cards show the current frame number, owning PID, resident page, or empty
+state. **Resident Page Mappings** lists each resident `(PID, page number)` and
+its physical frame. Identically numbered pages in different processes stay
+separate. Termination releases frames and removes those resident mappings;
+release is not an eviction.
+
+**Memory Reference History** retains executed events after release: timestamp,
+PID, virtual byte address, page number, frame number, physical byte address,
+hit/fault, evicted PID/page, and modeled fault latency. History follows event
+order, including events with the same timestamp. Only executed references appear.
+Hit and fault rates are percentages; zero references show 0%.
+**Cumulative modeled page-fault latency** sums the modeled latency of faults in
+simulation time units. This differs from the configured latency per fault and
+from elapsed simulation delay or total/average memory access time.
+
+**Process State Transitions** shows timestamped old/new states, event type, and
+recorded action. WAITING means blocked and does not necessarily indicate a page
+fault. Actions are displayed as recorded, without inferring a blocking cause.
+
+Displays update from simulation snapshots during Run, Step, and Reset, rather
+than at every simulated time unit. FCFS can execute several references inside one
+Step, while RR separates dispatch and CPU-slice snapshots. Reset clears memory
+counters, resident mappings, and activity histories while preserving the file
+system. Empty states distinguish disabled memory, no executed references, and
+no resident pages.
+
+For a quick check, select RR with quantum 1, FIFO, 2 frames, page size 4, fault
+latency 0. Add P1 (arrival 0, burst 6) with references `0:1`, `1:5`, `2:2`, `3:9`,
+`4:6` (offset: virtual address). After eight Steps, page 2 occupies frame 0 and
+page 1 occupies frame 1. Run to finish: 5 references, 3 faults, 2 hits, 1 eviction, 
+40% hit rate, 60% fault rate, cumulative latency 0, and empty frames with history retained.
+
+#### FIFO vs. LRU comparison
+
+In Memory Manager, enter virtual byte addresses separated by commas or whitespace,
+set the frame count and page size in bytes, then select **Compare FIFO and LRU**.
+Each policy starts with empty frames and receives the same trace. The table shows
+references, hits, faults, evictions, and fault rate. The API returns fault rate as
+a fraction from 0 to 1; the dashboard displays a percentage.
+
+For `0, 4, 0, 8, 0`, 2 frames, and 4-byte pages, FIFO produces 1 hit, 4 faults,
+2 evictions, and an 80% fault rate; LRU produces 2 hits, 3 faults, 1 eviction,
+and a 60% fault rate. Both process 5 references. Comparison inputs and results
+are separate from the active simulation and its exports. Comparing does not
+start, advance, or reset that simulation. Editing comparison inputs clears the
+previous comparison table.
+
 ### Simulating a blocked process
 
 `blocking_requests` maps elapsed CPU time to a positive blocking duration. For
@@ -119,7 +350,6 @@ the page fault is counted when a frame can be assigned. This prevents the
 simulator from repeatedly replacing pages before their owners can use them.
 This is a simplified simulation of memory pressure, not a complete model of
 an operating system's page reclaim or disk I/O.
-
 
 ### File system simulation
 
@@ -250,6 +480,125 @@ file_system = FileManager(authorizer=ReadOnlyAuthorizer())
 The built-in `AllowAllAuthorizer` is intended as the default policy for
 standalone use; it does not enforce access restrictions.
 
+#### File Manager Updates
+
+The File Manager backend has been expanded to support
+additional operations and validation requirements.
+
+Recent improvements include:
+
+- APPEND support for existing files.
+- OPEN and CLOSE operations with file handles.
+- HANDLE_READ and HANDLE_WRITE operations.
+- Read, write, append, and read/write file modes.
+- Process-specific working directories.
+- File ownership associated with requesting processes.
+- Three-character permission masks (rwx).
+- CHMOD operations for updating permissions.
+- File metadata and storage usage tracking.
+- UTF-8 byte-based file size calculations.
+- Improved command error handling and event logging.
+
+The File Manager is integrated with the Simulation Engine,
+allowing file requests to be executed at specified CPU-time
+offsets and recorded in the shared event history.
+
+File operations currently have zero simulated duration.
+
+The following command aliases remain unsupported:
+- mkfile (use CREATE)
+- cat (use READ)
+- rm (use DELETE)
+
+These three missing aliases are tracked by expected-failure
+tests and do not prevent the supported file operations
+from functioning.
+
+See `docs/file_manager_issue63.md` for additional details.
+
+#### File Manager requests
+
+In File Manager, select an existing PID and enter a CPU-execution offset and a
+command. The offset counts CPU time already executed by that process, not global
+simulation time, and must be an integer from 0 through `burst_time - 1`. Each
+process can have one command per offset. Use Edit, Save Request, Cancel Edit, or
+Remove in the request table. Commands, including quoted text and spaces, are
+preserved; command syntax and operation errors are reported when executed.
+
+Supported commands are `CREATE`, `WRITE`, `APPEND`, `READ`, `DELETE`, `MKDIR`,
+`RMDIR`, `LS`, `CD`, `PWD`, `STAT`, `OPEN`, `CLOSE`, `HANDLE_READ`, `HANDLE_WRITE`,
+`CHMOD`, and `STORAGE`. For example, upload this workload in Process Manager:
+
+```json
+{
+  "algorithm": "FCFS",
+  "processes": [{
+    "pid": "P1", "arrival_time": 0, "burst_time": 4,
+    "file_requests": {
+      "0": "MKDIR /docs",
+      "1": "CREATE /docs/notes.txt",
+      "2": "WRITE /docs/notes.txt \"Hello OS\"",
+      "3": "READ /docs/notes.txt"
+    }
+  }]
+}
+```
+
+Run produces `/docs/notes.txt` containing `Hello OS`. The activity log shows four
+successful operations at times 0, 1, 2, and 3; READ returns `Hello OS`, while the
+other operations show No output. The tree and activity log use actual simulation
+results, and directory expansion is retained across snapshot updates.
+
+Processes share one file tree but have separate working directories, initially
+`/`. `CD /docs` changes only the requesting process's working directory; absolute
+paths let another process access the same files. Requests without a `file_requests`
+map default to none. Invalid imports and edits leave valid inputs and results intact.
+
+`APPEND /docs/notes.txt " more text"` adds content to an existing file.
+`OPEN /docs/notes.txt r` returns a handle in the activity log; use that number in
+`HANDLE_READ`, `HANDLE_WRITE`, and `CLOSE` requests. Modes are `r`, `w`, `a`,
+`r+`, `w+`, and `a+`; modes starting with `w` truncate existing content. Create
+the file before opening it. Handle numbers belong to the current simulation;
+requests use literal numbers, without automatic substitution of OPEN results.
+Reset preserves handle state as well as files; use a fresh simulation for scripts
+that rely on handle numbering starting at 1.
+
+The tree shows recorded owners and UTF-8 file sizes. The Stored File Content
+metric shows the aggregate UTF-8 bytes from the displayed snapshot; Reset keeps
+this storage because it preserves files, while input changes clear the display.
+`STORAGE` also returns the byte count in the activity log. Process-created entries
+are owned by the creating PID. `CHMOD /docs/notes.txt r--` changes the shared
+permission mask, and only its owner can change it through process commands.
+`STAT` returns metadata, including permissions. The mask is one shared class,
+not separate owner/group/other permissions. Operation outcomes come directly
+from the backend, including successful reads whose content starts with `Error:`.
+
+Reset restarts process execution and clears the activity history while preserving
+the file tree and working directories. Repeating CREATE or MKDIR after Reset can
+therefore report an already-exists error. Accepted input changes clear displayed
+results; the next Run/Step starts a fresh simulation with an empty file system.
+Request editing is locked while a simulation runs.
+
+#### Memory and File Manager exports
+
+Memory Manager provides **Export Memory History CSV** and **Export Memory Log**.
+The CSV contains timestamp, PID, virtual address, page, frame, physical address,
+hit/fault, evicted PID/page, and modeled fault latency. File Manager provides
+**Export File Activity CSV** and **Export File Log** for timestamp, PID, command,
+backend outcome, and returned details. Timestamps and latency use simulation time
+units; addresses use bytes.
+
+Exports contain the latest displayed snapshot, including partial and paused runs.
+CSV files are UTF-8 with headers and quoted fields preserving commas, quotes,
+spaces, Unicode, and embedded line breaks. The `.log` files are UTF-8 text with
+one original event encoded as JSON per line, in recorded order; escaped newlines
+remain part of their original field values. Missing CSV values are empty fields.
+
+The buttons are disabled during Run or a simulation request and whenever the
+corresponding history is empty. Reset and accepted input changes clear stale
+activity exports; rejected inputs preserve them. Downloading does not advance
+or reset the simulation. The existing **Download results (JSON)** button continues
+to export the entire displayed snapshot.
 
 ### System integration
 
@@ -354,33 +703,52 @@ File operations currently have zero simulated duration.
 
 #### Reset behavior
 
-Reset clears the simulation timeline, event history, completed
-requests, and process execution states.
+Reset clears the simulation clock, event queue, event
+history, execution timeline, completed requests, and
+process execution states.
 
-The Memory Manager resets its memory state and counters. The
-Simulation Engine creates a new File Manager using the existing
-authorizer so file operations can be repeated in a new simulation.
+The scheduler is reinitialized using the current
+configuration. The Memory Manager resets its frame
+allocation, page tables, and memory statistics.
 
-The File Manager does not currently provide a separate reset
-method. Custom File Manager implementations may not be preserved
-when the simulation resets.
+The File Manager is preserved during simulation reset.
+Existing files, directories, and file metadata remain
+available after resetting the simulation.
+
+This allows process execution to restart without
+automatically deleting the simulated file system.
+
+A new SimulationEngine instance creates a new default
+File Manager unless an existing instance is supplied.
+
+Reset also preserves process-specific working directories
+and open file-handle state in the existing File Manager.
+
+Accepted workload changes clear the displayed results,
+and the next Run or Step creates a fresh simulation with
+a new file system. This differs from Reset, which preserves
+the current file system and may cause repeated CREATE or
+MKDIR commands to report already-existing entries.
 
 #### Integration testing
 
 Automated integration tests are located in
 `tests/test_system_integration.py`.
 
-The tests verify:
+The integration tests cover process scheduling, memory
+references, file operations, blocking and unblocking,
+event logging, and reset behavior.
 
-- Successful file operations
-- Invalid file commands and request offsets
-- Multiple file requests
-- Memory page faults
-- Process blocking and recovery
-- Combined memory and file-system execution
-- Unified event logging
-- Page-fault latency
-- Reset reproducibility
+Additional tests verify manager interactions, invalid
+inputs, deterministic behavior, and expected results.
+
+The latest verified main-branch GitHub Actions run
+(November 9, 2026) completed with 163 passed tests
+and 3 expected failures.
+
+Browser-based tests use Playwright and Chromium.
+The GitHub Actions workflow installs these dependencies
+before running the main test suite.
 
 Run the integration tests:
 
@@ -388,11 +756,22 @@ Run the integration tests:
 python -m pytest -q tests/test_system_integration.py
 ```
 
-All 10 integration tests passed.
+#### Manager test scenarios
 
-The backend test suite also passed 74 tests when excluding the
-dashboard and visualization browser tests. Those tests require
-Playwright and have not yet been verified in this environment.
+Memory Manager and File Manager each provide **Load Test Scenarios**. Loading
+replaces the workload and clears previous results without starting execution.
+Use Run or Step in Process Manager; an Expected / Actual / Pass-Fail table appears
+in the matching tab only after completion. Partial runs have no final verdict.
+
+The memory scenario expects 5 references, 2 hits, 3 faults, and 1 eviction with
+FIFO, 2 frames, and 4-byte pages. The file scenario creates `/demo/notes.txt`,
+writes and reads `Hello OS`, then deliberately reads `/missing.txt`; the reported
+missing-file error is an expected passing check.
+
+Reset clears the verdict. Repeating a completed scenario or running it after
+Reset starts a fresh simulation, so preserved files cannot affect its checks.
+Normal Reset behavior still preserves files. Accepted edits or imports leave
+test mode; ordinary workloads do not receive test verdicts.
 
 ### Parallel computing
 
@@ -449,8 +828,56 @@ Run the parallel computing tests:
 python -m pytest -q test_parallel.py
 ```
 
-The backend test suite passed 92 tests, excluding the dashboard
-and visualization browser tests that require Playwright.
+#### Parallel Computing Status
+
+The current parallel simulator supports FCFS execution
+across 1, 2, and 4 simulated CPU cores.
+
+The implementation provides:
+- Core assignment and execution timelines.
+- Makespan calculations.
+- Speedup and efficiency comparisons.
+- Throughput measurements.
+- Individual core utilization.
+- Deterministic race-condition demonstrations.
+- Synchronization and deadlock examples.
+
+The parallel simulator is currently a separate backend
+module and is not integrated into the main dashboard.
+
+The synchronization examples demonstrate expected
+behavior using deterministic operations rather than
+actual multithreaded execution.
+
+Future development will focus on expanding parallel
+execution capabilities and integrating performance
+comparisons into the dashboard.
+
+
+### Dashboard Development Status
+
+The dashboard currently includes functional process
+scheduling controls, process tables, a CPU Gantt chart,
+simulation metrics, memory statistics, physical memory
+frames, file system visualization, and file activity logs.
+
+The `dashboard-milestone-3` branch (PR #62) adds:
+
+- Editable memory configuration and per-process references.
+- File request editing and execution controls.
+- Improved JSON import validation.
+- Memory and File Manager activity histories.
+- CSV and log exports for both managers.
+- Built-in manager test scenarios with pass/fail comparisons.
+- FIFO vs. LRU memory replacement comparisons.
+- Expanded browser-based testing.
+
+These additional features are documented in the Memory
+Manager and File Manager sections above. 
+
+The Security, Device, Network, Parallel Computing,
+Scenario Builder, Testing Center, and Results pages
+still require further implementation.
 
 ### Port 5000 Troubleshooting
 
