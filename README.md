@@ -675,3 +675,18 @@ Reset clears the verdict. Repeating a completed scenario or running it after
 Reset starts a fresh simulation, so preserved files cannot affect its checks.
 Normal Reset behavior still preserves files. Accepted edits or imports leave
 test mode; ordinary workloads do not receive test verdicts.
+
+## FIFO vs. LRU comparison
+
+In Memory Manager, enter virtual byte addresses separated by commas or whitespace,
+set the frame count and page size in bytes, then select **Compare FIFO and LRU**.
+Each policy starts with empty frames and receives the same trace. The table shows
+references, hits, faults, evictions, and fault rate. The API returns fault rate as
+a fraction from 0 to 1; the dashboard displays a percentage.
+
+For `0, 4, 0, 8, 0`, 2 frames, and 4-byte pages, FIFO produces 1 hit, 4 faults,
+2 evictions, and an 80% fault rate; LRU produces 2 hits, 3 faults, 1 eviction,
+and a 60% fault rate. Both process 5 references. Comparison inputs and results
+are separate from the active simulation and its exports. Comparing does not
+start, advance, or reset that simulation. Editing comparison inputs clears the
+previous comparison table.

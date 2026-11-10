@@ -309,6 +309,39 @@
             </table>
         </div>
     </section>
+    <section id="memory-comparison" class="card">
+        <h2>FIFO vs. LRU Comparison</h2>
+        <p>Compare the same virtual byte addresses with initially empty frames. These inputs and results are separate from the active simulation and its exports.</p>
+        <form id="memory-comparison-form" novalidate>
+            <div class="process-fields">
+                <div>
+                    <label for="comparison-addresses">Address trace (commas or whitespace)</label>
+                    <input id="comparison-addresses" type="text" value="0, 4, 0, 8, 0" aria-describedby="comparison-addresses-error">
+                    <p id="comparison-addresses-error" class="field-error" role="alert"></p>
+                </div>
+                <div>
+                    <label for="comparison-frame-count">Frame count</label>
+                    <input id="comparison-frame-count" type="number" min="1" step="1" value="2" aria-describedby="comparison-frame-count-error">
+                    <p id="comparison-frame-count-error" class="field-error" role="alert"></p>
+                </div>
+                <div>
+                    <label for="comparison-page-size">Page size (bytes)</label>
+                    <input id="comparison-page-size" type="number" min="1" step="1" value="4" aria-describedby="comparison-page-size-error">
+                    <p id="comparison-page-size-error" class="field-error" role="alert"></p>
+                </div>
+            </div>
+            <button id="compare-memory" class="primary" type="submit">Compare FIFO and LRU</button>
+        </form>
+        <p id="comparison-error" class="field-error" role="alert"></p>
+        <p id="comparison-status" role="status"></p>
+        <div id="comparison-results" class="table-container" hidden>
+            <table class="process-table">
+                <thead><tr><th>Metric</th><th>FIFO</th><th>LRU</th></tr></thead>
+                <tbody id="comparison-body"></tbody>
+            </table>
+        </div>
+    </section>
+
     <p id="memory-start-error" tabindex="-1" class="field-error memory-notice" role="alert" hidden></p>
     <section class="card">
         <h2>Memory Configuration</h2>
@@ -518,6 +551,11 @@
         <h2>Process File Requests</h2>
         <p>Offsets count CPU time already executed by the selected process, not global simulation time.
         One command can be configured at each offset. Commands are parsed and executed by the simulator.</p>
+        <p>Supported commands: <code>MKDIR /docs</code>, <code>CREATE /docs/notes.txt</code>,
+        <code>WRITE /docs/notes.txt "Hello OS"</code>, <code>READ /docs/notes.txt</code>,
+        <code>DELETE /docs/notes.txt</code>, <code>RMDIR /docs</code>, <code>LS /</code>,
+        <code>CD /docs</code>, <code>PWD</code>, <code>STAT /docs</code>.
+        Operation errors are recorded in the activity log; each process has its own working directory in the shared file tree.</p>
         <form id="file-request-form" novalidate>
             <div class="process-fields">
                 <div>
@@ -539,11 +577,6 @@
             <button id="file-request-cancel" class="memory-secondary" type="button" hidden>Cancel Edit</button>
         </form>
         <p id="file-request-error" class="field-error" role="alert"></p>
-        <p>Supported commands: <code>MKDIR /docs</code>, <code>CREATE /docs/notes.txt</code>,
-        <code>WRITE /docs/notes.txt "Hello OS"</code>, <code>READ /docs/notes.txt</code>,
-        <code>DELETE /docs/notes.txt</code>, <code>RMDIR /docs</code>, <code>LS /</code>,
-        <code>CD /docs</code>, <code>PWD</code>, <code>STAT /docs</code>.
-        Operation errors are recorded in the activity log; each process has its own working directory in the shared file tree.</p>
         <details class="file-command-help">
             <summary>Append, file handles, permissions, and storage commands</summary>
             <ul>
@@ -655,6 +688,7 @@
     <script src="manager-tests.js"></script>
     <script src="memory-input.js"></script>
     <script src="file-input.js"></script>
+    <script src="memory-comparison.js"></script>
 
 </body>
 </html>

@@ -423,7 +423,8 @@ function lockWorkloadEditing() {
         "#process input, #process select, #process-form button, #process-table-body button, " +
         "#memory input, #memory select, #memory button, " +
         "#file-request-form input, #file-request-form textarea, #file-request-form select, #file-request-form button, #file-request-table-body button"
-    ), control => ({control, disabled: control.disabled}));
+    )).filter(control => !control.closest("#memory-comparison"))
+        .map(control => ({control, disabled: control.disabled}));
     for (const {control} of lockedWorkloadControls) control.disabled = true;
 }
 

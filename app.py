@@ -121,6 +121,41 @@ def start():
         return jsonify({"error": str(error)}), 400
 
 
+@app.route("/api/memory/compare", methods=["POST"])
+def compare_memory():
+    """Compare fresh FIFO/LRU managers; fault_rate is a fraction from 0 to 1."""
+    try:
+        data = json.loads(request.get_data(as_text=True), object_pairs_hook=reject_duplicate_keys)
+        if not isinstance(data, dict):
+            raise ValueError("Memory comparison input must be an object")
+        addresses = data.get("addresses")
+        if not isinstance(addresses, list) or not addresses:
+            raise ValueError("addresses must be a nonempty list of nonnegative integers")
+        for address in addresses:
+            if isinstance(address, bool) or not isinstance(address, int) or address < 0:
+                raise ValueError("Each address must be a nonnegative integer")
+
+        frame_count = data.get("frame_count")
+        page_size = data.get("page_size")
+        MemoryManager.validate_configuration(frame_count, page_size)
+
+        # Local managers and a synthetic process keep this independent of the engine.
+        process = Process("memory-comparison", 0, len(addresses))
+        results = {}
+        for policy in ("fifo", "lru"):
+            manager = MemoryManager(frame_count, page_size, algorithm=policy)
+            for address in addresses:
+                manager.reference(process, address)
+            metrics = manager.metrics()
+            results[policy] = {
+                key: metrics[key]
+                for key in ("references", "hits", "faults", "evictions", "fault_rate")
+            }
+        return jsonify(results)
+    except (ValueError, TypeError) as error:
+        return jsonify({"error": str(error)}), 400
+
+
 @app.route("/api/step", methods=["POST"])
 def step():
     if engine is None:
