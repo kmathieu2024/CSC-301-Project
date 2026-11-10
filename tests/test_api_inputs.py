@@ -28,12 +28,14 @@ def scenario(**requests):
     "field, first, second",
     [
         ("memory_references", 0, 4),
-        ("file_requests", "CREATE first.txt", "CREATE second.txt"),
+        pytest.param(
+            "file_requests", "CREATE first.txt", "CREATE second.txt",
+            marks=pytest.mark.xfail(
+                strict=True, raises=KnownInputGap,
+                reason="Equivalent offset keys silently overwrite a request",
+            ),
+        ),
     ],
-)
-@pytest.mark.xfail(
-    strict=True, raises=KnownInputGap,
-    reason="Equivalent offset keys silently overwrite a request",
 )
 def test_equivalent_request_offsets_are_rejected(client, field, first, second):
     response = client.post(
