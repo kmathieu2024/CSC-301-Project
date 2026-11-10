@@ -84,3 +84,14 @@ function validateFileRequests(requests, burst) {
     // Keep commands verbatim; the backend alone parses command syntax.
     return requests;
 }
+
+function validateBlockingRequests(requests, burst) {
+    if (!isObject(requests)) throw new Error("blocking_requests must be an offset-to-duration object.");
+    for (const [offset, duration] of Object.entries(requests)) {
+        if (!/^(0|[1-9][0-9]*)$/.test(offset) || !Number.isSafeInteger(Number(offset)) || Number(offset) >= burst)
+            throw new Error("Blocking offset must be a nonnegative integer less than burst time.");
+        if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0)
+            throw new Error("Blocking duration must be a positive finite number.");
+    }
+    return requests;
+}
