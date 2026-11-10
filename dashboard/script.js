@@ -45,6 +45,7 @@ const processTableBody = document.getElementById("process-table-body");
 processForm.addEventListener("submit", function (event) {
     // Prevent the form from refreshing the page.
     event.preventDefault();
+    if (busy) return;
     processError.textContent = "";
 
     if (!validateConfiguration()) {
@@ -107,12 +108,15 @@ processForm.addEventListener("submit", function (event) {
     });
 
     renderProcessTable();
+    inputChanged();
     processForm.reset();
     document.getElementById("process-id").focus();
 });
 
 // Rebuild the table using the current processes.
 function renderProcessTable() {
+    renderReferenceEditor();
+    renderFileRequestEditor();
     processTableBody.replaceChildren();
 
     if (processes.length === 0) {
@@ -151,9 +155,11 @@ function renderProcessTable() {
         removeButton.setAttribute("aria-label", "Remove " + process.pid);
 
         removeButton.addEventListener("click", function () {
+            if (busy) return;
             processes.splice(index, 1);
             processError.textContent = "";
             renderProcessTable();
+            inputChanged();
         });
 
         actionCell.appendChild(removeButton);
@@ -165,10 +171,132 @@ function renderProcessTable() {
 const processFileInput = document.getElementById("process-file");
 const uploadStatus = document.getElementById("upload-status");
 
+function loadWorkload(data) {
+    const validAlgorithms = ["FCFS", "SJF", "SRTF", "RR", "PRIORITY"];
+
+    if (data === null || typeof data !== "object" ||
+        Array.isArray(data)) {
+        throw new Error("The file must contain a JSON object.");
+    }
+
+    if (!validAlgorithms.includes(data.algorithm)) {
+        throw new Error(
+            "Algorithm must be FCFS, SJF, SRTF, RR, or PRIORITY."
+        );
+    }
+
+    validateMemoryAssociations(data);
+    const importedMemory = validateMemory(data.memory);
+    const importedConfiguration = data.configuration;
+    if (importedConfiguration !== undefined) {
+        if (!isObject(importedConfiguration)) throw new Error("Configuration must be an object.");
+        for (const [key, minimum] of [["context_switch_cost", 0], ["time_quantum", 1], ["aging_interval", 1]]) {
+            if (importedConfiguration[key] !== undefined &&
+                (!Number.isSafeInteger(importedConfiguration[key]) || importedConfiguration[key] < minimum))
+                throw new Error(key + " must be a whole number of " + minimum + " or greater.");
+        }
+    }
+
+    if (!Array.isArray(data.processes) || data.processes.length === 0) {
+        throw new Error("The file must contain a nonempty processes list.");
+    }
+
+    const uploadedProcesses = [];
+    const usedIds = new Set();
+
+    data.processes.forEach(function (process, index) {
+        const rowLabel = "Process " + (index + 1) + ": ";
+
+        if (process === null || typeof process !== "object" ||
+            Array.isArray(process)) {
+            throw new Error(rowLabel + "must be a process object.");
+        }
+
+        if (typeof process.pid !== "string" ||
+            process.pid.trim() === "") {
+            throw new Error(rowLabel + "ID must be nonempty text.");
+        }
+
+        const pid = process.pid.trim();
+
+        if (usedIds.has(pid)) {
+            throw new Error(rowLabel + "duplicate ID " + pid + ".");
+        }
+
+        if (!Number.isSafeInteger(process.arrival_time) ||
+            process.arrival_time < 0) {
+            throw new Error(
+                rowLabel + "arrival time must be a whole number of 0 or greater."
+            );
+        }
+
+        if (!Number.isSafeInteger(process.burst_time) ||
+            process.burst_time < 1) {
+            throw new Error(
+                rowLabel + "burst time must be a whole number of 1 or greater."
+            );
+        }
+
+        // Match the Python model's default priority when omitted.
+        const priority =
+            process.priority === undefined ? 1 : process.priority;
+
+        if (!Number.isSafeInteger(priority) || priority < 1) {
+            throw new Error(
+                rowLabel + "priority must be a whole number of 1 or greater."
+            );
+        }
+
+        usedIds.add(pid);
+
+        // Keep memory references and file requests from uploaded processes.
+        uploadedProcesses.push({
+            ...process,
+            pid: pid,
+            arrival_time: process.arrival_time,
+            burst_time: process.burst_time,
+            priority: priority,
+            memory_references: validateReferences(
+                process.memory_references === undefined ? {} : process.memory_references,
+                process.burst_time
+            ),
+            file_requests: validateFileRequests(
+                process.file_requests === undefined ? {} : process.file_requests,
+                process.burst_time
+            )
+        });
+    });
+
+    if (!importedMemory.enabled && uploadedProcesses.some(p => Object.keys(p.memory_references).length))
+        throw new Error("Enable memory simulation or remove memory references before importing.");
+    // File reading is asynchronous: do not replace inputs if Run began meanwhile.
+    if (busy) throw new Error("Wait for the simulation to pause before importing.");
+    // Update the dashboard only after every process passes validation.
+    // Clear Add drafts too: they have no fileRequestEdit object for redraw cleanup.
+    cancelFileRequestEdit();
+    applyMemoryConfiguration(importedMemory);
+    if (importedConfiguration) {
+        for (const [key, id] of [["context_switch_cost", "context-switch-cost"], ["time_quantum", "time-quantum"], ["aging_interval", "aging-interval"]]) {
+            if (importedConfiguration[key] !== undefined) document.getElementById(id).value = importedConfiguration[key];
+        }
+    }
+    processes.length = 0;
+
+    uploadedProcesses.forEach(function (process) {
+        processes.push(process);
+    });
+
+    algorithmSelect.value = data.algorithm;
+    updateConfigurationFields();
+    renderProcessTable();
+    inputChanged();
+
+}
+
 processFileInput.addEventListener("change", async function () {
     const file = processFileInput.files[0];
 
-    if (!file) {
+    if (busy || !file) {
         return;
     }
 
@@ -178,96 +306,9 @@ processFileInput.addEventListener("change", async function () {
     try {
         // Reading a file takes time, so await waits for its text.
         const fileText = await file.text();
-        const data = JSON.parse(fileText);
+        const data = parseInputJson(fileText);
 
-        const validAlgorithms = ["FCFS", "SJF", "SRTF", "RR", "PRIORITY"];
-
-        if (data === null || typeof data !== "object" ||
-            Array.isArray(data)) {
-            throw new Error("The file must contain a JSON object.");
-        }
-
-        if (!validAlgorithms.includes(data.algorithm)) {
-            throw new Error(
-                "Algorithm must be FCFS, SJF, SRTF, RR, or PRIORITY."
-            );
-        }
-
-        collectConfiguration(data.algorithm);
-
-        if (!Array.isArray(data.processes) || data.processes.length === 0) {
-            throw new Error("The file must contain a nonempty processes list.");
-        }
-
-        const uploadedProcesses = [];
-        const usedIds = new Set();
-
-        data.processes.forEach(function (process, index) {
-            const rowLabel = "Process " + (index + 1) + ": ";
-
-            if (process === null || typeof process !== "object" ||
-                Array.isArray(process)) {
-                throw new Error(rowLabel + "must be a process object.");
-            }
-
-            if (typeof process.pid !== "string" ||
-                process.pid.trim() === "") {
-                throw new Error(rowLabel + "ID must be nonempty text.");
-            }
-
-            const pid = process.pid.trim();
-
-            if (usedIds.has(pid)) {
-                throw new Error(rowLabel + "duplicate ID " + pid + ".");
-            }
-
-            if (!Number.isSafeInteger(process.arrival_time) ||
-                process.arrival_time < 0) {
-                throw new Error(
-                    rowLabel + "arrival time must be a whole number of 0 or greater."
-                );
-            }
-
-            if (!Number.isSafeInteger(process.burst_time) ||
-                process.burst_time < 1) {
-                throw new Error(
-                    rowLabel + "burst time must be a whole number of 1 or greater."
-                );
-            }
-
-            // Match the Python model's default priority when omitted.
-            const priority =
-                process.priority === undefined ? 1 : process.priority;
-
-            if (!Number.isSafeInteger(priority) || priority < 1) {
-                throw new Error(
-                    rowLabel + "priority must be a whole number of 1 or greater."
-                );
-            }
-
-            usedIds.add(pid);
-
-            // Keep memory references and file requests from uploaded processes.
-        uploadedProcesses.push({
-            pid: pid,
-            arrival_time: process.arrival_time,
-            burst_time: process.burst_time,
-            priority: priority,
-            memory_references: process.memory_references || {},
-            file_requests: process.file_requests || {}
-        });
-        });
-
-        // Update the dashboard only after every process passes validation.
-        processes.length = 0;
-
-        uploadedProcesses.forEach(function (process) {
-            processes.push(process);
-        });
-
-        algorithmSelect.value = data.algorithm;
-        updateConfigurationFields();
-        renderProcessTable();
+        loadWorkload(data);
 
         uploadStatus.textContent =
             "Loaded " + processes.length + " processes from " + file.name + ".";
@@ -304,12 +345,19 @@ function collectSimulationInput() {
     // Preserve memory references and file requests for each process.
     const processCopies = processes.map(function (process) {
         return {
+            ...process,
             pid: process.pid,
             arrival_time: process.arrival_time,
             burst_time: process.burst_time,
             priority: process.priority,
-            memory_references: process.memory_references || {},
-            file_requests: process.file_requests || {}
+            memory_references: validateReferences(
+                process.memory_references === undefined ? {} : process.memory_references,
+                process.burst_time
+            ),
+            file_requests: validateFileRequests(
+                process.file_requests === undefined ? {} : process.file_requests,
+                process.burst_time
+            )
         };
     });
 
@@ -318,13 +366,7 @@ function collectSimulationInput() {
         algorithm: algorithm,
         configuration: configuration,
         processes: processCopies,
-        memory: {
-            enabled: true,
-            frame_count: 3,
-            page_size: 4,
-            algorithm: "fifo",
-            fault_latency: 0
-        }
+        memory: collectMemoryConfiguration()
     };
 }
 
@@ -349,6 +391,49 @@ let busy = false;
 let savedInput = "";
 let resultsJson = "";
 
+// Capture the HTML's initial placeholders so invalidation restores every display
+// consistently, without resetting the backend or manufacturing simulation results.
+const initialResultDisplays = Array.from(document.querySelectorAll(
+    ".simulation-results .metric p, #process-metrics-body, #gantt-chart, #gantt-empty, " +
+    "#memory .metric p, #memory-frame-grid, #memory-mapping-body, #memory-history-body, " +
+    "#memory-transition-body, #file-storage-used, #file-tree-container, #file-activity-body"
+), element => ({element, initial: element.cloneNode(true)}));
+
+function inputChanged() {
+    clearManagerTestMode();
+    started = false;
+    savedInput = "";
+    resultsJson = "";
+    updateManagerExportButtons();
+    updateManagerTestButtons();
+    for (const {element, initial} of initialResultDisplays) {
+        element.replaceChildren(...Array.from(initial.childNodes, node => node.cloneNode(true)));
+        element.hidden = initial.hidden;
+    }
+    document.getElementById("export-results-button").disabled = true;
+    document.getElementById("step-button").disabled = false;
+    simulationError.textContent = "";
+    simulationStatus.textContent = "Inputs changed. Run or Step to start a new simulation.";
+}
+
+let lockedWorkloadControls = [];
+
+function lockWorkloadEditing() {
+    lockedWorkloadControls = Array.from(document.querySelectorAll(
+        "#process input, #process select, #process-form button, #process-table-body button, " +
+        "#memory input, #memory select, #memory button, " +
+        "#file-request-form input, #file-request-form textarea, #file-request-form select, #file-request-form button, #file-request-table-body button"
+    )).filter(control => !control.closest("#memory-comparison"))
+        .map(control => ({control, disabled: control.disabled}));
+    for (const {control} of lockedWorkloadControls) control.disabled = true;
+}
+
+function unlockWorkloadEditing() {
+    for (const {control, disabled} of lockedWorkloadControls) control.disabled = disabled;
+    lockedWorkloadControls = [];
+}
+
+
 
 // Send information to Python.
 async function sendRequest(action, data = {}) {
@@ -358,7 +443,20 @@ async function sendRequest(action, data = {}) {
         body: JSON.stringify(data)
     });
 
-    const result = await response.json();
+    // A preview proxy or server error may return plain text/HTML instead of JSON.
+    // Report the actual HTTP response rather than exposing JSON.parse's error.
+    const body = await response.text();
+    let result;
+    try {
+        result = JSON.parse(body);
+    } catch (error) {
+        const detail = body.trim().slice(0, 160) || "Empty response";
+        throw new Error(
+            "Unexpected response from /api/" + action + " (HTTP " + response.status + "). " +
+            "The server returned non-JSON content: " + detail +
+            " Open http://127.0.0.1:5000/ in an external browser and check the server terminal."
+        );
+    }
 
     if (!response.ok) {
         throw new Error(result.error || "Simulation failed");
@@ -373,6 +471,8 @@ function showResults(result) {
     renderMemoryManager(result);
     renderFileManager(result);
     resultsJson = JSON.stringify(result, null, 4);
+    updateManagerExportButtons();
+    updateManagerTestButtons();
     document.getElementById("export-results-button").disabled = false;
 
     const completed = result.processes.filter(function (process) {
@@ -381,6 +481,7 @@ function showResults(result) {
 
     const total = result.processes.length;
     const finished = total > 0 && completed === total;
+    renderManagerTestResult(result, finished);
     document.getElementById("step-button").disabled = finished;
 
     simulationStatus.textContent =
@@ -428,20 +529,7 @@ function exportResults() {
     if (!resultsJson) return;
 
     try {
-        const file = new Blob([resultsJson + "\n"], {
-            type: "application/json"
-        });
-        const url = URL.createObjectURL(file);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "simulation-results.json";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        // Allow the browser to begin downloading before releasing the URL.
-        setTimeout(function () {
-            URL.revokeObjectURL(url);
-        }, 1000);
+        downloadText("simulation-results.json", resultsJson + "\n", "application/json");
     } catch (error) {
         simulationError.textContent = "Export failed: " + error.message;
     }
@@ -455,8 +543,29 @@ async function startSimulation() {
         return false;
     }
 
+    if (!validateMemoryControls()) {
+        const notice = document.getElementById("memory-start-error");
+        notice.textContent = "The simulation could not start. Correct the highlighted memory inputs below.";
+        notice.hidden = false;
+        showPage("memory", document.querySelector("button[onclick*=\"'memory'\"]"));
+        notice.focus();
+        notice.scrollIntoView({block: "start"});
+        return false;
+    }
+    if (fileRequestValidationActive && !validateFileRequestFields()) {
+        showPage("file", document.querySelector("button[onclick*=\"'file'\"]"));
+        document.querySelector('#file-request-form [aria-invalid="true"]')?.focus();
+        return false;
+    }
+    if (activeManagerTest && managerTestFinished) {
+        // Every completed scenario retry starts with a new engine/file system.
+        started = false;
+        savedInput = "";
+        clearManagerTestVerdict();
+    }
     const input = collectSimulationInput();
     const text = JSON.stringify(input);
+    lockWorkloadEditing();
 
     if (!started || savedInput !== text) {
         const result = await sendRequest("start", input);
@@ -474,6 +583,8 @@ async function stepSimulation() {
     if (running || busy) return;
 
     busy = true;
+    updateManagerExportButtons();
+    updateManagerTestButtons();
     simulationError.textContent = "";
 
     try {
@@ -482,9 +593,12 @@ async function stepSimulation() {
         }
     } catch (error) {
         simulationError.textContent = error.message;
+    } finally {
+        busy = false;
+        unlockWorkloadEditing();
+        updateManagerExportButtons();
+        updateManagerTestButtons();
     }
-
-    busy = false;
 }
 
 
@@ -493,6 +607,8 @@ async function runSimulation() {
     if (running || busy) return;
 
     busy = true;
+    updateManagerExportButtons();
+    updateManagerTestButtons();
     simulationError.textContent = "";
 
     try {
@@ -513,6 +629,9 @@ async function runSimulation() {
     } finally {
         running = false;
         busy = false;
+        unlockWorkloadEditing();
+        updateManagerExportButtons();
+        updateManagerTestButtons();
         document.getElementById("pause-button").disabled = true;
     }
 }
@@ -533,11 +652,18 @@ async function resetSimulation() {
     }
 
     busy = true;
+    updateManagerExportButtons();
+    updateManagerTestButtons();
     simulationError.textContent = "";
 
     try {
         if (started) {
             showResults(await sendRequest("reset"));
+            if (activeManagerTest) {
+                // Reset still preserves files; the next scenario attempt is fresh.
+                started = false;
+                savedInput = "";
+            }
         } else {
             simulationStatus.textContent = "Simulation not started.";
         }
@@ -545,6 +671,8 @@ async function resetSimulation() {
         simulationError.textContent = error.message;
     } finally {
         busy = false;
+        updateManagerExportButtons();
+        updateManagerTestButtons();
     }
 }
 
@@ -635,13 +763,15 @@ const configurationInputIds = [
 
 configurationInputIds.forEach(function (inputId) {
     document.getElementById(inputId).addEventListener("input", function () {
-        simulationStatus.textContent = "Simulation not started.";
+        if (busy) return;
+        inputChanged();
         validateConfiguration();
     });
 });
 
 algorithmSelect.addEventListener("change", function () {
-    simulationStatus.textContent = "Simulation not started.";
+    if (busy) return;
+    inputChanged();
     validateConfiguration();
 });
 
@@ -770,86 +900,42 @@ function renderProcessMetrics(result) {
         tableBody.appendChild(row);
     });
 }
-// Display memory statistics and frame allocation for the current simulation.
-
-function renderMemoryManager(results) {
-    const metrics = results.memory_metrics;
-    const frames = results.memory_frames || [];
-
-    const values = {
-        "memory-references": metrics?.references ?? "—",
-        "memory-hits": metrics?.hits ?? "—",
-        "memory-faults": metrics?.faults ?? "—",
-        "memory-evictions": metrics?.evictions ?? "—",
-        "memory-fault-rate": metrics
-            ? (metrics.fault_rate * 100).toFixed(1) + "%"
-            : "—",
-        "memory-used-frames": metrics?.used_frames ?? "—"
-    };
-
-    for (const [id, value] of Object.entries(values)) {
-        document.getElementById(id).textContent = value;
-    }
-
-    const container = document.getElementById("memory-frame-grid");
-    container.replaceChildren();
-
-    if (!metrics) {
-        container.textContent =
-            "Memory Manager is not enabled for this simulation.";
-        return;
-    }
-
-    frames.forEach(function (frame) {
-        const card = document.createElement("div");
-        const occupied = frame.pid !== null;
-
-        card.className = occupied
-            ? "memory-frame occupied"
-            : "memory-frame empty";
-
-        const heading = document.createElement("strong");
-        heading.textContent = "Frame " + frame.frame;
-
-        const content = document.createElement("p");
-        content.textContent = occupied
-            ? "Process: " + frame.pid + " | Page: " + frame.page
-            : "Empty";
-
-        card.append(heading, content);
-        container.appendChild(card);
-    });
-}
 // Display the file system tree and file operation history.
 
 function renderFileManager(results) {
+    // Use the snapshot's aggregate metric, never an estimate from inputs or DOM.
+    document.getElementById("file-storage-used").textContent = results.file_storage_used ?? "\u2014";
     const container = document.getElementById("file-tree-container");
+    const directoryStates = new Map(Array.from(container.querySelectorAll("details[data-path]"),
+        details => [details.dataset.path, details.open]));
     container.replaceChildren();
 
-    function createTreeNode(node) {
+    function createTreeNode(node, ancestors = []) {
         const item = document.createElement("div");
         item.className = "file-tree-node";
 
         if (node.type === "directory") {
             const details = document.createElement("details");
-            details.open = node.name === "/";
+            const path = [...ancestors, node.name];
+            details.dataset.path = JSON.stringify(path);
+            details.open = directoryStates.get(details.dataset.path) ?? (node.name === "/");
 
             const summary = document.createElement("summary");
-            summary.textContent = "📁 " + node.name;
+            summary.textContent = "📁 " + node.name + (node.owner == null ? "" : " | Owner: " + node.owner);
             details.appendChild(summary);
 
             const children = document.createElement("div");
             children.className = "file-tree-children";
 
             (node.children || []).forEach(function (child) {
-                children.appendChild(createTreeNode(child));
+                children.appendChild(createTreeNode(child, path));
             });
 
             details.appendChild(children);
             item.appendChild(details);
         } else {
             item.textContent = "📄 " + node.name +
-                " (" + node.size + " bytes)";
+                " (" + node.size + " bytes)" + (node.owner == null ? "" : " | Owner: " + node.owner);
         }
 
         return item;
@@ -871,7 +957,7 @@ function renderFileManager(results) {
     if (events.length === 0) {
         const row = document.createElement("tr");
         const cell = document.createElement("td");
-        cell.colSpan = 4;
+        cell.colSpan = 5;
         cell.textContent = "No file operations recorded yet.";
         row.appendChild(cell);
         tbody.appendChild(row);
@@ -886,9 +972,9 @@ function renderFileManager(results) {
             event.timestamp ?? "—",
             event.entity_id ?? "—",
             event.action ?? "—",
-            event.outcome === "error"
-                ? "Error: " + event.message
-                : "Success" + (event.message ? ": " + event.message : "")
+            event.outcome === "success" ? "Success" : event.outcome === "error" ? "Error" : (event.outcome ?? "Unknown"),
+            event.message === "" || event.message === null || event.message === undefined
+                ? "No output" : event.message
         ];
 
         values.forEach(function (value) {

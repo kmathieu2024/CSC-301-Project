@@ -295,6 +295,123 @@
 
 <div id="memory" class="page">
     <h1>Memory Manager</h1>
+    <section class="card manager-test-controls">
+        <h2>Memory Test Scenario</h2>
+        <div class="control-buttons">
+            <button id="load-memory-test" type="button" aria-describedby="memory-test-note">Load Test Scenario</button>
+        </div>
+        <p id="memory-test-note">Replaces the current workload and clears previous results. Use Run or Step in Process Manager to execute it.</p>
+        <p id="memory-test-status" role="status"></p>
+        <div id="memory-test-results" class="table-container" hidden>
+            <table class="process-table" aria-label="Memory test checks">
+                <thead><tr><th scope="col">Check</th><th scope="col">Expected</th><th scope="col">Actual</th><th scope="col">Pass / Fail</th></tr></thead>
+                <tbody id="memory-test-body"></tbody>
+            </table>
+        </div>
+    </section>
+    <section id="memory-comparison" class="card">
+        <h2>FIFO vs. LRU Comparison</h2>
+        <p>Compare the same virtual byte addresses with initially empty frames. These inputs and results are separate from the active simulation and its exports.</p>
+        <form id="memory-comparison-form" novalidate>
+            <div class="process-fields">
+                <div>
+                    <label for="comparison-addresses">Address trace (commas or whitespace)</label>
+                    <input id="comparison-addresses" type="text" value="0, 4, 0, 8, 0" aria-describedby="comparison-addresses-error">
+                    <p id="comparison-addresses-error" class="field-error" role="alert"></p>
+                </div>
+                <div>
+                    <label for="comparison-frame-count">Frame count</label>
+                    <input id="comparison-frame-count" type="number" min="1" step="1" value="2" aria-describedby="comparison-frame-count-error">
+                    <p id="comparison-frame-count-error" class="field-error" role="alert"></p>
+                </div>
+                <div>
+                    <label for="comparison-page-size">Page size (bytes)</label>
+                    <input id="comparison-page-size" type="number" min="1" step="1" value="4" aria-describedby="comparison-page-size-error">
+                    <p id="comparison-page-size-error" class="field-error" role="alert"></p>
+                </div>
+            </div>
+            <button id="compare-memory" class="primary" type="submit">Compare FIFO and LRU</button>
+        </form>
+        <p id="comparison-error" class="field-error" role="alert"></p>
+        <p id="comparison-status" role="status"></p>
+        <div id="comparison-results" class="table-container" hidden>
+            <table class="process-table">
+                <thead><tr><th>Metric</th><th>FIFO</th><th>LRU</th></tr></thead>
+                <tbody id="comparison-body"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <p id="memory-start-error" tabindex="-1" class="field-error memory-notice" role="alert" hidden></p>
+    <section class="card">
+        <h2>Memory Configuration</h2>
+        <div class="memory-enable-control">
+            <label for="memory-enabled">
+                <input type="checkbox" id="memory-enabled" aria-describedby="memory-error" checked>
+                Enable memory simulation
+            </label>
+            <p id="memory-error" class="field-error" role="alert"></p>
+        </div>
+        <div class="process-fields">
+            <div>
+                <label for="memory-policy">Replacement policy</label>
+                <select id="memory-policy" aria-describedby="memory-policy-error">
+                    <option value="fifo">FIFO</option>
+                    <option value="lru">LRU</option>
+                </select>
+                <p id="memory-policy-error" class="field-error" role="alert"></p>
+            </div>
+            <div>
+                <label for="memory-frame-count">Frame count</label>
+                <input type="number" id="memory-frame-count"
+                    aria-describedby="memory-frame-count-error"
+                    value="3" min="1" step="1">
+                <p id="memory-frame-count-error" class="field-error" role="alert"></p>
+            </div>
+            <div>
+                <label for="memory-page-size">Page size (bytes)</label>
+                <input type="number" id="memory-page-size"
+                    aria-describedby="memory-page-size-error"
+                    value="4" min="1" step="1">
+                <p id="memory-page-size-error" class="field-error" role="alert"></p>
+            </div>
+            <div>
+                <label for="memory-fault-latency">Page-fault latency (simulation units)</label>
+                <input type="number" id="memory-fault-latency"
+                    aria-describedby="memory-fault-latency-error"
+                    value="0" min="0" step="any">
+                <p id="memory-fault-latency-error" class="field-error" role="alert"></p>
+            </div>
+        </div>
+    </section>
+    <section class="card">
+        <h2>Process Memory References</h2>
+        <p>The offset is CPU time already executed by this process, not global simulation time.
+        Enter a virtual byte address, not a page number. Page = floor(address / page size).</p>
+        <form id="reference-form" novalidate>
+            <div class="process-fields">
+                <div><label for="reference-pid">Existing PID</label><select id="reference-pid" aria-describedby="reference-error"></select></div>
+                <div>
+                    <label for="reference-offset">CPU-execution offset</label>
+                    <input id="reference-offset" aria-describedby="reference-offset-error" type="number" min="0" step="1">
+                    <p id="reference-offset-error" class="field-error" role="alert"></p>
+                </div>
+                <div>
+                    <label for="reference-address">Virtual address (bytes)</label>
+                    <input id="reference-address" aria-describedby="reference-address-error" type="number" min="0" step="1">
+                    <p id="reference-address-error" class="field-error" role="alert"></p>
+                </div>
+            </div>
+            <button id="reference-save" class="primary" type="submit">Add Reference</button>
+            <button id="reference-cancel" class="memory-secondary" type="button" hidden>Cancel Edit</button>
+        </form>
+        <p id="reference-error" class="field-error" role="alert"></p>
+        <div class="table-container"><table class="process-table">
+            <thead><tr><th>PID</th><th>CPU offset</th><th>Virtual address (bytes)</th><th>Page number</th><th>Actions</th></tr></thead>
+            <tbody id="reference-table-body"></tbody>
+        </table></div>
+    </section>
+
     <p>View memory usage, page replacement activity, and frame allocation.</p>
 
     <section class="card">
@@ -317,14 +434,25 @@
                 <p id="memory-evictions">—</p>
             </div>
             <div class="metric">
-                <h3>Fault Rate</h3>
+                <h3>Fault Rate (%)</h3>
                 <p id="memory-fault-rate">—</p>
+            </div>
+            <div class="metric">
+                <h3>Hit Rate (%)</h3>
+                <p id="memory-hit-rate">&#8212;</p>
+            </div>
+            <div class="metric">
+                <h3>Cumulative Modeled Page-Fault Latency (simulation units)</h3>
+                <p id="memory-total-fault-latency">&#8212;</p>
             </div>
             <div class="metric">
                 <h3>Occupied Frames</h3>
                 <p id="memory-used-frames">—</p>
             </div>
         </div>
+        <p>Rates use executed references; both are 0% before any reference executes.
+        Cumulative modeled fault latency is the sum charged to faults, not elapsed simulation delay
+        or total/average access time. Configured latency per fault is not included in result snapshots.</p>
     </section>
 
     <section class="card">
@@ -334,14 +462,154 @@
             <p>Start a memory-enabled simulation to view frames.</p>
         </div>
     </section>
+    <section class="card">
+        <h2>Resident Page Mappings</h2>
+        <p>Current snapshot only: each process owns its own pages. Page numbers and frame numbers are distinct.</p>
+        <div class="table-container">
+            <table class="process-table" aria-label="Resident Page Mappings">
+                <thead>
+                    <tr>
+                        <th scope="col">PID</th>
+                        <th scope="col">Resident page number</th>
+                        <th scope="col">Frame number</th>
+                    </tr>
+                </thead>
+                <tbody id="memory-mapping-body"><tr><td colspan="3">Start a simulation to view resident mappings.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Memory Reference History</h2>
+        <div class="control-buttons">
+            <button id="export-memory-csv" type="button" disabled>Export Memory History CSV</button>
+            <button id="export-memory-log" type="button" disabled>Export Memory Log</button>
+        </div>
+        <p>Accumulated executed references, in backend event order. History remains after frames are released. Addresses are bytes; modeled fault latency uses simulation time units.</p>
+        <div class="table-container">
+            <table class="process-table" aria-label="Memory Reference History">
+                <thead>
+                    <tr>
+                        <th scope="col">Timestamp (simulation units)</th>
+                        <th scope="col">PID</th>
+                        <th scope="col">Virtual address (bytes)</th>
+                        <th scope="col">Page number</th>
+                        <th scope="col">Frame number</th>
+                        <th scope="col">Physical address (bytes)</th>
+                        <th scope="col">Hit / fault</th>
+                        <th scope="col">Evicted PID</th>
+                        <th scope="col">Evicted page number</th>
+                        <th scope="col">Modeled fault latency (simulation units)</th>
+                    </tr>
+                </thead>
+                <tbody id="memory-history-body"><tr><td colspan="10">Start a simulation to view executed memory references.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Process State Transitions</h2>
+        <p>WAITING is the backend blocked state. Recorded actions are shown verbatim. A WAITING transition does not necessarily mean a page fault.</p>
+        <div class="table-container">
+            <table class="process-table" aria-label="Process State Transitions">
+                <thead>
+                    <tr>
+                        <th scope="col">Timestamp (simulation units)</th>
+                        <th scope="col">PID</th>
+                        <th scope="col">Previous state</th>
+                        <th scope="col">New state</th>
+                        <th scope="col">Event type</th>
+                        <th scope="col">Recorded action</th>
+                    </tr>
+                </thead>
+                <tbody id="memory-transition-body"><tr><td colspan="6">Start a simulation to view process state transitions.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
 </div>
 
 <div id="file" class="page">
     <h1>File Manager</h1>
+    <section class="card manager-test-controls">
+        <h2>File Test Scenario</h2>
+        <div class="control-buttons">
+            <button id="load-file-test" type="button" aria-describedby="file-test-note">Load Test Scenario</button>
+        </div>
+        <p id="file-test-note">Replaces the current workload and clears previous results. Use Run or Step in Process Manager to execute it.</p>
+        <p id="file-test-status" role="status"></p>
+        <div id="file-test-results" class="table-container" hidden>
+            <table class="process-table" aria-label="File test checks">
+                <thead><tr><th scope="col">Check</th><th scope="col">Expected</th><th scope="col">Actual</th><th scope="col">Pass / Fail</th></tr></thead>
+                <tbody id="file-test-body"></tbody>
+            </table>
+        </div>
+    </section>
     <p>Explore the simulated file system and review file operations.</p>
 
     <section class="card">
+        <h2>Process File Requests</h2>
+        <p>Offsets count CPU time already executed by the selected process, not global simulation time.
+        One command can be configured at each offset. Commands are parsed and executed by the simulator.</p>
+        <p>Supported commands: <code>MKDIR /docs</code>, <code>CREATE /docs/notes.txt</code>,
+        <code>WRITE /docs/notes.txt "Hello OS"</code>, <code>READ /docs/notes.txt</code>,
+        <code>DELETE /docs/notes.txt</code>, <code>RMDIR /docs</code>, <code>LS /</code>,
+        <code>CD /docs</code>, <code>PWD</code>, <code>STAT /docs</code>.
+        Operation errors are recorded in the activity log; each process has its own working directory in the shared file tree.</p>
+        <form id="file-request-form" novalidate>
+            <div class="process-fields">
+                <div>
+                    <label for="file-request-pid">Existing PID</label>
+                    <select id="file-request-pid" aria-describedby="file-request-error"></select>
+                </div>
+                <div>
+                    <label for="file-request-offset">CPU-execution offset</label>
+                    <input id="file-request-offset" type="number" min="0" step="1" aria-describedby="file-request-offset-error">
+                    <p id="file-request-offset-error" class="field-error" role="alert"></p>
+                </div>
+                <div>
+                    <label for="file-request-command">File command</label>
+                    <textarea id="file-request-command" rows="2" placeholder='WRITE /docs/notes.txt "Hello OS"' aria-describedby="file-request-command-error"></textarea>
+                    <p id="file-request-command-error" class="field-error" role="alert"></p>
+                </div>
+            </div>
+            <button id="file-request-save" class="primary" type="submit">Add Request</button>
+            <button id="file-request-cancel" class="memory-secondary" type="button" hidden>Cancel Edit</button>
+        </form>
+        <p id="file-request-error" class="field-error" role="alert"></p>
+        <details class="file-command-help">
+            <summary>Append, file handles, permissions, and storage commands</summary>
+            <ul>
+                <li><code>APPEND /docs/notes.txt " more text"</code> adds content.</li>
+                <li><code>OPEN /docs/notes.txt r</code> opens an existing file and returns a handle in the activity log.
+                Modes: <code>r</code>, <code>w</code>, <code>a</code>, <code>r+</code>, <code>w+</code>, <code>a+</code>.
+                Modes beginning with <code>w</code> truncate the file.</li>
+                <li><code>HANDLE_READ 1</code>, <code>HANDLE_WRITE 1 "text"</code>, and <code>CLOSE 1</code>
+                use the returned handle. The number 1 is an example; handles belong to the current simulation.
+                Requests use literal handle numbers, without automatic substitution.
+                Reset preserves handle state; use a fresh simulation when a script relies on numbering starting at 1.</li>
+                <li><code>CHMOD /docs/notes.txt r--</code> changes the shared permission mask.
+                The creating process PID is the owner; only that owner can change permissions through process requests.</li>
+                <li><code>STORAGE</code> returns the total UTF-8 bytes of file contents.
+                <code>STAT /docs/notes.txt</code> returns metadata, including permissions.</li>
+            </ul>
+        </details>
+        <div class="table-container">
+            <table class="process-table" aria-label="Configured file requests">
+                <thead><tr><th scope="col">PID</th><th scope="col">CPU offset</th><th scope="col">Command</th><th scope="col">Actions</th></tr></thead>
+                <tbody id="file-request-table-body"><tr><td colspan="4">No file requests configured.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
         <h2>File System Tree</h2>
+        <div class="metric-grid">
+            <div class="metric">
+                <h3>Stored File Content (UTF-8 bytes)</h3>
+                <p id="file-storage-used">&#8212;</p>
+            </div>
+        </div>
         <p>Expand directories to view their files and subdirectories.</p>
         <div id="file-tree-container">
             <p>Start a simulation to view the file system.</p>
@@ -350,6 +618,10 @@
 
     <section class="card">
         <h2>File System Activity</h2>
+        <div class="control-buttons">
+            <button id="export-file-csv" type="button" disabled>Export File Activity CSV</button>
+            <button id="export-file-log" type="button" disabled>Export File Log</button>
+        </div>
         <div class="table-container">
             <table class="process-table">
                 <thead>
@@ -357,12 +629,13 @@
                         <th scope="col">Time</th>
                         <th scope="col">Process</th>
                         <th scope="col">Operation</th>
+                        <th scope="col">Outcome</th>
                         <th scope="col">Details</th>
                     </tr>
                 </thead>
                 <tbody id="file-activity-body">
                     <tr>
-                        <td colspan="4">No file operations recorded yet.</td>
+                        <td colspan="5">No file operations recorded yet.</td>
                     </tr>
                 </tbody>
             </table>
@@ -408,7 +681,14 @@
 
     </div>
 
+    <script src="input-validation.js"></script>
+    <script src="memory-results.js"></script>
     <script src="script.js"></script>
+    <script src="manager-exports.js"></script>
+    <script src="manager-tests.js"></script>
+    <script src="memory-input.js"></script>
+    <script src="file-input.js"></script>
+    <script src="memory-comparison.js"></script>
 
 </body>
 </html>

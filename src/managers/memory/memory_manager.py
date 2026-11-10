@@ -21,7 +21,9 @@ class Translation:
 class MemoryManager:
     """Global demand-paged memory with FIFO or LRU replacement."""
 
-    def __init__(self, frame_count, page_size=1, algorithm="fifo", fault_latency=0):
+    @staticmethod
+    def validate_configuration(frame_count, page_size=1, algorithm="fifo", fault_latency=0):
+        """Check settings without allocating frames or changing manager state."""
         for name, value in (("frame_count", frame_count), ("page_size", page_size)):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
@@ -29,6 +31,9 @@ class MemoryManager:
             raise ValueError("algorithm must be fifo or lru")
         if isinstance(fault_latency, bool) or not isinstance(fault_latency, (int, float)) or not 0 <= fault_latency < float('inf'):
             raise ValueError("fault_latency must be a finite nonnegative number")
+
+    def __init__(self, frame_count, page_size=1, algorithm="fifo", fault_latency=0):
+        self.validate_configuration(frame_count, page_size, algorithm, fault_latency)
         self.frame_count, self.page_size = frame_count, page_size
         self.algorithm, self.fault_latency = algorithm.lower(), fault_latency
         self.reset()
