@@ -470,15 +470,27 @@ def test_controls_focus_invalid_configuration(page: Page, button):
     )
 
 @pytest.mark.parametrize("button", ["Run", "Step"])
-def test_valid_controls_use_backend(page: Page, button):
-    page.goto("http://127.0.0.1:5000/")
+def test_valid_controls_use_backend(page: Page, button, m3_dashboard_url):
+    page.goto(m3_dashboard_url)
     page.get_by_role("button", name="Process Manager", exact=True).click()
-    enter_process(page)
+    enter_process(page, arrival="2")
 
-    page.get_by_role("button", name=button, exact=True).click()
+    with page.expect_response(
+        lambda response: response.url.endswith("/api/step")
+        and response.request.method == "POST"
+    ) as step:
+        page.get_by_role("button", name=button, exact=True).click()
 
+    assert step.value.status == 200
     expect(page.locator("#simulation-error")).to_be_empty()
-    expect(page.locator("#simulation-status")).to_contain_text("Simulation time:")
+    if button == "Step":
+        expect(page.locator("#result-current-time")).to_have_text("2")
+        expect(page.locator("#result-completed")).to_have_text("0 / 1")
+        expect(page.locator("#process-metrics-body .state-badge")).to_have_text("RUNNING")
+    else:
+        expect(page.locator("#result-current-time")).to_have_text("6")
+        expect(page.locator("#result-completed")).to_have_text("1 / 1")
+        expect(page.locator("#process-metrics-body .state-badge")).to_have_text("TERMINATED")
 
 
 @pytest.fixture(scope="module")
