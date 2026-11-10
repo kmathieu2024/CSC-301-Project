@@ -4,9 +4,19 @@
 This project is a Python-based operating system simulator
 developed by a six-member team.
 
-The simulator will model several operating system components,
+The simulator models several operating system components,
 including process management, memory management, file systems,
-security, device management, and networking.
+and parallel computing. Security, device management, and
+networking are planned for subsequent development milestones.
+
+The project uses a Python simulation backend, Flask API,
+and an interactive HTML, CSS, and JavaScript dashboard to
+demonstrate operating system concepts, resource management,
+and system performance.
+
+The simulator supports deterministic process scheduling,
+memory page replacement, file system operations, and
+event-based integration between managers.
 
 ## Team Member Names and Roles
 **Kyla Jones-Atkinson** - Project Lead and Integration <br>
@@ -18,16 +28,30 @@ security, device management, and networking.
 
 ## Project Structure
 - src/: Simulator source code
-- dashboard/: User interface
-- tests/: Automated tests
-- test_data/: Sample inputs and expected outputs
-- docs/: Project documentation
-- designs/: Component design documents
+  - core/: Process models and discrete-event simulation engine
+  - managers/: Operating system manager implementations
+    - process/: CPU scheduling algorithms
+    - memory/: Memory management and page replacement
+    - file/: File system operations
+    - security/: Security Manager (planned)
+    - device/: Device Manager (planned)
+    - network/: Network Manager (planned)
+  - parallel/: Multicore simulation and synchronization demonstrations
+- dashboard/: HTML, CSS, and JavaScript user interface
+- app.py: Flask application and simulation API
+- tests/: Automated unit, integration, and dashboard tests
+- test_parallel.py: Parallel computing tests
+- test_data/: Sample inputs, traces, and expected results
+- docs/: Project documentation and development guidelines
+- .github/workflows/: Automated testing workflow
 
 ## Requirements
 - Python 3.11 or newer
 - pip
+- Flask
 - pytest
+- pytest-playwright (for browser-based tests)
+- Chromium (for Playwright browser tests)
 
 ## Installation
 
@@ -35,13 +59,53 @@ security, device management, and networking.
 2. Open the project in VS Code.
 3. Install dependencies:
 
+   ```bash
    python -m pip install -r requirements.txt
+   ```
+   
+4. To install development and browser-testing dependencies:
+
+   ```bash
+   python -m pip install -r requirements-dev.txt
+   python -m playwright install chromium
+   ```
 
 ## Running Tests
 
-Run:
+Run the main test suite:
 
-   python -m pytest tests/ -v
+```bash
+python -m pytest tests/ -v
+```
+
+Run the parallel computing tests:
+
+```bash
+python -m pytest test_parallel.py -v
+```
+
+Run all tests:
+
+```bash
+python -m pytest -q
+```
+
+GitHub Actions automatically runs the main test suite
+on pushes and pull requests using Python 3.11.
+
+As of November 9, 2026, the latest verified main-branch
+GitHub Actions run reported:
+
+- 163 passed
+- 3 expected failures
+- 0 unexpected failures
+
+The three expected failures concern unsupported file
+command aliases: `mkfile`, `cat`, and `rm`.
+
+These results describe the CI-configured `tests/` suite.
+The separate `test_parallel.py` module is not included
+in that workflow's test command.
 
 ## Development Workflow
 1. Create a branch for your assigned task.
@@ -53,8 +117,47 @@ Run:
 See docs/git_workflow.md for details.
 
 ## Current Status
-Milestone 1: Repository setup, architecture design,
-baseline test cases, and project documentation.
+
+**Milestone 1 - Completed**
+- Established the repository structure and development workflow.
+- Developed the system architecture and manager interfaces.
+- Created the requirements traceability matrix and risk register.
+- Implemented the initial interactive dashboard prototype.
+- Established baseline scenarios and testing documentation.
+
+**Milestone 2 - Completed**
+- Implemented the discrete-event simulation engine.
+- Implemented FCFS, SJF, SRTF, Round Robin, and Priority
+  scheduling with aging.
+- Added configurable quantum and context-switch overhead.
+- Implemented deterministic process arrival and scheduling behavior.
+- Added process state transitions, including blocking and unblocking.
+- Implemented the CPU Gantt chart and process metrics table.
+- Added simulation controls, event logging, and JSON results export.
+- Expanded automated scheduling and simulation tests.
+
+**Milestone 3 - In Progress**
+- Implemented FIFO and LRU memory page replacement.
+- Added configurable memory frames, page size, and fault latency.
+- Integrated page faults with process blocking and unblocking.
+- Implemented the in-memory File Manager and file operations.
+- Added file metadata, ownership, permissions, and storage tracking.
+- Integrated Process, Memory, and File Manager events.
+- Added memory statistics, frame visualization, and file tree
+  displays to the dashboard.
+- Implemented an initial 1-, 2-, and 4-core parallel simulator.
+- Added race-condition and deadlock demonstrations.
+- Expanded automated manager and integration tests.
+- Continuing dashboard input controls, manager comparisons,
+  and visualization improvements.
+
+**Milestone 4 - Planned**
+- Implement the Security, Device, and Network Managers.
+- Integrate all six managers through the simulation engine.
+- Complete the remaining dashboard workspaces.
+- Expand independent manager and system integration testing.
+- Finalize performance experiments, documentation,
+  and project demonstration.
 
 ### Running the Simulation Dashboard
 
@@ -94,6 +197,30 @@ Memory is released when a process terminates. Memory events include the
 translation and any evicted `(pid, page)` pair. `memory.frames`,
 `memory.page_tables`, and `memory.metrics()` expose current state; reset clears
 memory and counters. Simulation reset also resets its memory manager.
+
+#### Memory Manager Status
+
+The Memory Manager currently supports FIFO and LRU page
+replacement, configurable page sizes and frame counts,
+virtual-to-physical address translation, and page-fault
+latency.
+
+Memory references are integrated with process execution.
+Page faults with nonzero latency cause a process to enter
+the WAITING state until its unblock event occurs.
+
+The manager tracks page references, hits, faults,
+evictions, fault rates, and occupied frames.
+
+The dashboard displays memory statistics and physical
+frame allocation. Additional memory input controls and
+visualizations are being developed in the Milestone 3
+dashboard branch.
+
+Optimal page replacement is not implemented on the
+current main branch. A separate implementation was
+proposed in PR #65 but was closed without merging.
+
 ### Simulating a blocked process
 
 `blocking_requests` maps elapsed CPU time to a positive blocking duration. For
@@ -119,7 +246,6 @@ the page fault is counted when a frame can be assigned. This prevents the
 simulator from repeatedly replacing pages before their owners can use them.
 This is a simplified simulation of memory pressure, not a complete model of
 an operating system's page reclaim or disk I/O.
-
 
 ### File system simulation
 
@@ -250,6 +376,41 @@ file_system = FileManager(authorizer=ReadOnlyAuthorizer())
 The built-in `AllowAllAuthorizer` is intended as the default policy for
 standalone use; it does not enforce access restrictions.
 
+#### File Manager Updates
+
+The File Manager backend has been expanded to support
+additional operations and validation requirements.
+
+Recent improvements include:
+
+- APPEND support for existing files.
+- OPEN and CLOSE operations with file handles.
+- HANDLE_READ and HANDLE_WRITE operations.
+- Read, write, append, and read/write file modes.
+- Process-specific working directories.
+- File ownership associated with requesting processes.
+- Three-character permission masks (rwx).
+- CHMOD operations for updating permissions.
+- File metadata and storage usage tracking.
+- UTF-8 byte-based file size calculations.
+- Improved command error handling and event logging.
+
+The File Manager is integrated with the Simulation Engine,
+allowing file requests to be executed at specified CPU-time
+offsets and recorded in the shared event history.
+
+File operations currently have zero simulated duration.
+
+The following command aliases remain unsupported:
+- mkfile (use CREATE)
+- cat (use READ)
+- rm (use DELETE)
+
+These three missing aliases are tracked by expected-failure
+tests and do not prevent the supported file operations
+from functioning.
+
+See `docs/file_manager_issue63.md` for additional details.
 
 ### System integration
 
@@ -354,45 +515,49 @@ File operations currently have zero simulated duration.
 
 #### Reset behavior
 
-Reset clears the simulation timeline, event history, completed
-requests, and process execution states.
+Reset clears the simulation clock, event queue, event
+history, execution timeline, completed requests, and
+process execution states.
 
-The Memory Manager resets its memory state and counters. The
-Simulation Engine creates a new File Manager using the existing
-authorizer so file operations can be repeated in a new simulation.
+The scheduler is reinitialized using the current
+configuration. The Memory Manager resets its frame
+allocation, page tables, and memory statistics.
 
-The File Manager does not currently provide a separate reset
-method. Custom File Manager implementations may not be preserved
-when the simulation resets.
+The File Manager is preserved during simulation reset.
+Existing files, directories, and file metadata remain
+available after resetting the simulation.
+
+This allows process execution to restart without
+automatically deleting the simulated file system.
+
+A new SimulationEngine instance creates a new default
+File Manager unless an existing instance is supplied.
 
 #### Integration testing
 
 Automated integration tests are located in
 `tests/test_system_integration.py`.
 
-The tests verify:
+The integration tests cover process scheduling, memory
+references, file operations, blocking and unblocking,
+event logging, and reset behavior.
 
-- Successful file operations
-- Invalid file commands and request offsets
-- Multiple file requests
-- Memory page faults
-- Process blocking and recovery
-- Combined memory and file-system execution
-- Unified event logging
-- Page-fault latency
-- Reset reproducibility
+Additional tests verify manager interactions, invalid
+inputs, deterministic behavior, and expected results.
+
+The latest verified main-branch GitHub Actions run
+(November 9, 2026) completed with 163 passed tests
+and 3 expected failures.
+
+Browser-based tests use Playwright and Chromium.
+The GitHub Actions workflow installs these dependencies
+before running the main test suite.
 
 Run the integration tests:
 
 ```bash
 python -m pytest -q tests/test_system_integration.py
 ```
-
-All 10 integration tests passed.
-
-The backend test suite also passed 74 tests when excluding the
-dashboard and visualization browser tests. Those tests require
-Playwright and have not yet been verified in this environment.
 
 ### Parallel computing
 
@@ -449,8 +614,56 @@ Run the parallel computing tests:
 python -m pytest -q test_parallel.py
 ```
 
-The backend test suite passed 92 tests, excluding the dashboard
-and visualization browser tests that require Playwright.
+#### Parallel Computing Status
+
+The current parallel simulator supports FCFS execution
+across 1, 2, and 4 simulated CPU cores.
+
+The implementation provides:
+- Core assignment and execution timelines.
+- Makespan calculations.
+- Speedup and efficiency comparisons.
+- Throughput measurements.
+- Individual core utilization.
+- Deterministic race-condition demonstrations.
+- Synchronization and deadlock examples.
+
+The parallel simulator is currently a separate backend
+module and is not integrated into the main dashboard.
+
+The synchronization examples demonstrate expected
+behavior using deterministic operations rather than
+actual multithreaded execution.
+
+Future development will focus on expanding parallel
+execution capabilities and integrating performance
+comparisons into the dashboard.
+
+### Dashboard Development Status
+
+The dashboard currently includes functional process
+scheduling controls, process tables, a CPU Gantt chart,
+simulation metrics, memory statistics, physical memory
+frames, file system visualization, and file activity logs.
+
+Additional dashboard functionality is under development
+in the `dashboard-milestone-3` branch (PR #62).
+
+This development includes:
+- Editable memory configuration.
+- Per-process memory reference inputs.
+- Improved JSON import validation.
+- Memory input validation and error handling.
+- Additional manager visualizations and exports.
+- Expanded browser-based testing.
+
+PR #62 remains an open draft as of November 9, 2026.
+These changes are not yet considered merged main-branch
+functionality.
+
+The Security, Device, Network, Parallel Computing,
+Scenario Builder, Testing Center, and Results pages
+still require further implementation.
 
 ### Port 5000 Troubleshooting
 
@@ -478,4 +691,28 @@ Run the automated tests using:
 python -m pytest -q
 ```
 
-Browser tests that use a hardcoded local server URL require the server to be available at that address.
+Browser tests that use a hardcoded local server URL 
+require the server to be available at that address.
+
+### Known Limitations and Future Work
+
+The project remains under active development.
+
+Current limitations include:
+
+- Optimal page replacement is not yet available on main.
+- File command aliases `mkfile`, `cat`, and `rm`
+  are not yet supported.
+- File operations currently have zero simulated duration.
+- The frontend Round Robin default is 2 time units,
+  while the backend default is 4.
+- The parallel simulator is separate from the main
+  simulation engine and dashboard.
+- Security, Device, and Network Managers are not yet
+  implemented.
+- Several dashboard workspaces remain placeholders.
+- Full six-manager integration is still pending.
+
+Future milestones will focus on completing these
+components, expanding integration testing, improving
+visualizations, and validating system-wide behavior.
