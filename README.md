@@ -905,28 +905,215 @@ Run the automated tests using:
 python -m pytest -q
 ```
 
-Browser tests that use a hardcoded local server URL 
-require the server to be available at that address.
+Browser tests that use a hardcoded local server URL require the server to be available at that address.
 
-### Known Limitations and Future Work
 
-The project remains under active development.
+## Memory Manager inputs
 
-Current limitations include:
+In Memory Manager, enable memory simulation and choose FIFO/LRU, frame count,
+page size in bytes, and page-fault latency in simulation time units. Select an
+existing PID to add references; use Edit or Remove on a reference row.
+CPU offsets count time already executed by that process, **not global time**.
+Addresses are virtual byte addresses; page number is `floor(address / page_size)`.
+Offsets must be integers from zero through `burst_time - 1`; addresses must be
+nonnegative integers. Numeric integers must fit JavaScript's safe integer range.
+Latency may be fractional but must be finite and nonnegative.
 
-- Optimal page replacement is not yet available on main.
-- File command aliases `mkfile`, `cat`, and `rm`
-  are not yet supported.
-- File operations currently have zero simulated duration.
-- The frontend Round Robin default is 2 time units,
-  while the backend default is 4.
-- The parallel simulator is separate from the main
-  simulation engine and dashboard.
-- Security, Device, and Network Managers are not yet
-  implemented.
-- Several dashboard workspaces remain placeholders.
-- Full six-manager integration is still pending.
+Upload a JSON file from Process Manager, for example:
 
-Future milestones will focus on completing these
-components, expanding integration testing, improving
-visualizations, and validating system-wide behavior.
+```json
+{
+  "algorithm": "FCFS",
+  "configuration": {"context_switch_cost": 0},
+  "memory": {
+    "enabled": true,
+    "frame_count": 3,
+    "page_size": 4,
+    "algorithm": "fifo",
+    "fault_latency": 0
+  },
+  "processes": [
+    {
+      "pid": "P1",
+      "arrival_time": 0,
+      "burst_time": 4,
+      "priority": 1,
+      "memory_references": {"0": 8, "2": 9},
+      "file_requests": {"1": "mkdir /example"}
+    }
+  ]
+}
+```
+
+When `memory` or its optional settings are absent, both dashboard and API use
+memory enabled, 3 frames, 4-byte pages, FIFO (`fifo`), and zero fault latency.
+Missing `memory_references` means no references; missing priority means 1.
+Older process files remain supported. Missing scheduling configuration retains
+current dashboard scheduling controls. Imported configuration values update those
+controls when supplied. Process fields, including `file_requests`, are preserved.
+
+Reference maps belong inside their process, use canonical decimal keys (`"0"`,
+`"1"`, etc.), and cannot contain duplicate keys or offset aliases such as `"01"`.
+The complete import is validated before replacing inputs. Disabling memory keeps
+references visible, but Run/Step are blocked until memory is enabled again or all
+references are explicitly removed. Disabled memory configuration fields retain
+their displayed values for re-enabling.
+
+Accepted input changes clear previous results and disable export. Run or Step
+starts a fresh simulation. Rejected edits and imports preserve existing inputs
+and results. Workload editing is disabled while a simulation is running.
+
+
+## Memory Manager results
+
+Frame cards show the current frame number, owning PID, resident page, or empty
+state. **Resident Page Mappings** lists each resident `(PID, page number)` and
+its physical frame. Identically numbered pages in different processes stay
+separate. Termination releases frames and removes those resident mappings;
+release is not an eviction.
+
+**Memory Reference History** retains executed events after release: timestamp,
+PID, virtual byte address, page number, frame number, physical byte address,
+hit/fault, evicted PID/page, and modeled fault latency. History follows event
+order, including events with the same timestamp. Only executed references appear.
+Hit and fault rates are percentages; zero references show 0%.
+**Cumulative modeled page-fault latency** sums the modeled latency of faults in
+simulation time units. This differs from the configured latency per fault and
+from elapsed simulation delay or total/average memory access time.
+
+**Process State Transitions** shows timestamped old/new states, event type, and
+recorded action. WAITING means blocked and does not necessarily indicate a page
+fault. Actions are displayed as recorded, without inferring a blocking cause.
+
+Displays update from simulation snapshots during Run, Step, and Reset, rather
+than at every simulated time unit. FCFS can execute several references inside one
+Step, while RR separates dispatch and CPU-slice snapshots. Reset clears memory
+counters, resident mappings, and activity histories while preserving the file
+system. Empty states distinguish disabled memory, no executed references, and
+no resident pages.
+
+For a quick check, select RR with quantum 1, FIFO, 2 frames, page size 4, fault
+latency 0. Add P1 (arrival 0, burst 6) with references `0:1`, `1:5`, `2:2`, `3:9`,
+`4:6` (offset:virtual address). After eight Steps, page 2 occupies frame 0 and
+page 1 frame 1. Run to finish: 5 references, 3 faults, 2 hits, 1 eviction, 40% hit
+rate, 60% fault rate, cumulative latency 0, and empty frames with history retained.
+
+
+## File Manager requests
+
+In File Manager, select an existing PID and enter a CPU-execution offset and a
+command. The offset counts CPU time already executed by that process, not global
+simulation time, and must be an integer from 0 through `burst_time - 1`. Each
+process can have one command per offset. Use Edit, Save Request, Cancel Edit, or
+Remove in the request table. Commands, including quoted text and spaces, are
+preserved; command syntax and operation errors are reported when executed.
+
+Supported commands are `CREATE`, `WRITE`, `APPEND`, `READ`, `DELETE`, `MKDIR`,
+`RMDIR`, `LS`, `CD`, `PWD`, `STAT`, `OPEN`, `CLOSE`, `HANDLE_READ`, `HANDLE_WRITE`,
+`CHMOD`, and `STORAGE`. For example, upload this workload in Process Manager:
+
+```json
+{
+  "algorithm": "FCFS",
+  "processes": [{
+    "pid": "P1", "arrival_time": 0, "burst_time": 4,
+    "file_requests": {
+      "0": "MKDIR /docs",
+      "1": "CREATE /docs/notes.txt",
+      "2": "WRITE /docs/notes.txt \"Hello OS\"",
+      "3": "READ /docs/notes.txt"
+    }
+  }]
+}
+```
+
+Run produces `/docs/notes.txt` containing `Hello OS`. The activity log shows four
+successful operations at times 0, 1, 2, and 3; READ returns `Hello OS`, while the
+other operations show No output. The tree and activity log use actual simulation
+results, and directory expansion is retained across snapshot updates.
+
+Processes share one file tree but have separate working directories, initially
+`/`. `CD /docs` changes only the requesting process's working directory; absolute
+paths let another process access the same files. Requests without a `file_requests`
+map default to none. Invalid imports and edits leave valid inputs and results intact.
+
+`APPEND /docs/notes.txt " more text"` adds content to an existing file.
+`OPEN /docs/notes.txt r` returns a handle in the activity log; use that number in
+`HANDLE_READ`, `HANDLE_WRITE`, and `CLOSE` requests. Modes are `r`, `w`, `a`,
+`r+`, `w+`, and `a+`; modes starting with `w` truncate existing content. Create
+the file before opening it. Handle numbers belong to the current simulation;
+requests use literal numbers, without automatic substitution of OPEN results.
+Reset preserves handle state as well as files; use a fresh simulation for scripts
+that rely on handle numbering starting at 1.
+
+The tree shows recorded owners and UTF-8 file sizes. The Stored File Content
+metric shows the aggregate UTF-8 bytes from the displayed snapshot; Reset keeps
+this storage because it preserves files, while input changes clear the display.
+`STORAGE` also returns the byte count in the activity log. Process-created entries
+are owned by the creating PID. `CHMOD /docs/notes.txt r--` changes the shared
+permission mask, and only its owner can change it through process commands.
+`STAT` returns metadata, including permissions. The mask is one shared class,
+not separate owner/group/other permissions. Operation outcomes come directly
+from the backend, including successful reads whose content starts with `Error:`.
+
+
+Reset restarts process execution and clears the activity history while preserving
+the file tree and working directories. Repeating CREATE or MKDIR after Reset can
+therefore report an already-exists error. Accepted input changes clear displayed
+results; the next Run/Step starts a fresh simulation with an empty file system.
+Request editing is locked while a simulation runs.
+
+
+## Memory and File Manager exports
+
+Memory Manager provides **Export Memory History CSV** and **Export Memory Log**.
+The CSV contains timestamp, PID, virtual address, page, frame, physical address,
+hit/fault, evicted PID/page, and modeled fault latency. File Manager provides
+**Export File Activity CSV** and **Export File Log** for timestamp, PID, command,
+backend outcome, and returned details. Timestamps and latency use simulation time
+units; addresses use bytes.
+
+Exports contain the latest displayed snapshot, including partial and paused runs.
+CSV files are UTF-8 with headers and quoted fields preserving commas, quotes,
+spaces, Unicode, and embedded line breaks. The `.log` files are UTF-8 text with
+one original event encoded as JSON per line, in recorded order; escaped newlines
+remain part of their original field values. Missing CSV values are empty fields.
+
+The buttons are disabled during Run or a simulation request and whenever the
+corresponding history is empty. Reset and accepted input changes clear stale
+activity exports; rejected inputs preserve them. Downloading does not advance
+or reset the simulation. The existing **Download results (JSON)** button continues
+to export the entire displayed snapshot.
+
+
+## Manager test scenarios
+
+Memory Manager and File Manager each provide **Load Test Scenario**. Loading
+replaces the workload and clears previous results without starting execution.
+Use Run or Step in Process Manager; an Expected / Actual / Pass-Fail table appears
+in the matching tab only after completion. Partial runs have no final verdict.
+
+The memory scenario expects 5 references, 2 hits, 3 faults, and 1 eviction with
+FIFO, 2 frames, and 4-byte pages. The file scenario creates `/demo/notes.txt`,
+writes and reads `Hello OS`, then deliberately reads `/missing.txt`; the reported
+missing-file error is an expected passing check.
+
+Reset clears the verdict. Repeating a completed scenario or running it after
+Reset starts a fresh simulation, so preserved files cannot affect its checks.
+Normal Reset behavior still preserves files. Accepted edits or imports leave
+test mode; ordinary workloads do not receive test verdicts.
+
+## FIFO vs. LRU comparison
+
+In Memory Manager, enter virtual byte addresses separated by commas or whitespace,
+set the frame count and page size in bytes, then select **Compare FIFO and LRU**.
+Each policy starts with empty frames and receives the same trace. The table shows
+references, hits, faults, evictions, and fault rate. The API returns fault rate as
+a fraction from 0 to 1; the dashboard displays a percentage.
+
+For `0, 4, 0, 8, 0`, 2 frames, and 4-byte pages, FIFO produces 1 hit, 4 faults,
+2 evictions, and an 80% fault rate; LRU produces 2 hits, 3 faults, 1 eviction,
+and a 60% fault rate. Both process 5 references. Comparison inputs and results
+are separate from the active simulation and its exports. Comparing does not
+start, advance, or reset that simulation. Editing comparison inputs clears the
+previous comparison table.
