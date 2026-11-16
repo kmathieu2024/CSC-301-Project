@@ -15,7 +15,7 @@ class SimulationEngine:
     def __init__(self, processes, algorithm="fcfs", quantum=4,
              aging_interval=4, context_switch=0,
              scenario_id="default", seed=0, memory_manager=None,
-             file_manager=None):
+             file_manager=None, security_manager=None):
 
         self.processes = list(processes)
         validate_processes(self.processes)
@@ -41,7 +41,13 @@ class SimulationEngine:
         self.scenario_id = scenario_id
         self.seed = seed
         self.memory_manager = memory_manager
+        self.security_manager = security_manager
         self.file_manager = file_manager if file_manager is not None else FileManager()
+        if self.security_manager is not None:
+            # FileManager already delegates each protected operation through
+            # this interface; injecting the manager keeps authorization in one
+            # place and preserves the existing file-operation API.
+            self.file_manager.authorizer = self.security_manager
 
         for process in self.processes:
             for offset, command in process.file_requests.items():
@@ -96,6 +102,13 @@ class SimulationEngine:
         self._runner = None
         self._blocks_done = set()
         self._files_done = set()
+        if self.security_manager is not None:
+            # The audit history intentionally survives reset. Only the current
+            # run's security events are copied into this run's unified stream.
+            self._security_event_cursor = len(self.security_manager.security_events)
+            self.security_manager.set_context(0, self.scenario_id)
+        else:
+            self._security_event_cursor = 0
 
         # Add aarrivals to the event queue.
 
@@ -350,11 +363,20 @@ class SimulationEngine:
                     and key not in self._files_done
                 ):
                     command = process.file_requests[executed]
+                    if self.security_manager is not None:
+                        self.security_manager.set_context(
+                            self.current_time, self.scenario_id
+                        )
                     result = self.file_manager.execute_command(
                         command,
                         process_id=process.pid,
                         user=process.pid,
                     )
+                    if self.security_manager is not None:
+                        security_events = self.security_manager.security_events
+                        for security_event in security_events[self._security_event_cursor:]:
+                            self.events.append(security_event)
+                        self._security_event_cursor = len(security_events)
 
                     failed = (isinstance(result, str) and result.startswith("Error:")
                               and getattr(self.file_manager, "_last_command_failed", True))
@@ -706,6 +728,25 @@ class SimulationEngine:
             ] if self.memory_manager is not None else [],
             "file_tree": self.get_file_tree(),
             "file_storage_used": self.file_manager.storage_used(),
+            "security_enabled": self.security_manager is not None,
+            "security_users": (
+                self.security_manager.users if self.security_manager is not None else []
+            ),
+            "security_roles": (
+                self.security_manager.roles if self.security_manager is not None else []
+            ),
+            "security_events": (
+                list(self.security_manager.security_events)
+                if self.security_manager is not None else []
+            ),
+            "security_alerts": (
+                list(self.security_manager.security_alerts)
+                if self.security_manager is not None else []
+            ),
+            "audit_log": (
+                list(self.security_manager.audit_log)
+                if self.security_manager is not None else []
+            ),
             "algorithm": self.algorithm,
             "current_time": self.current_time,
             "seed": self.seed,

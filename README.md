@@ -6,8 +6,8 @@ developed by a six-member team.
 
 The simulator models several operating system components,
 including process management, memory management, file systems,
-and parallel computing. Security, device management, and
-networking are planned for subsequent development milestones.
+parallel computing, and role-based security. Device management
+and networking are planned for subsequent development milestones.
 
 The project uses a Python simulation backend, Flask API,
 and an interactive HTML, CSS, and JavaScript dashboard to
@@ -33,7 +33,7 @@ event-based integration between managers.
     - process/: CPU scheduling algorithms
     - memory/: Memory management and page replacement
     - file/: File system operations
-    - security/: Security Manager (planned)
+    - security/: Role-based access control, authorization, alerts, and audit log
     - device/: Device Manager (planned)
     - network/: Network Manager (planned)
   - parallel/: Multicore simulation and synchronization demonstrations
@@ -151,8 +151,12 @@ See docs/git_workflow.md for details.
 - Continuing dashboard input controls, manager comparisons,
   and visualization improvements.
 
-**Milestone 4 - Planned**
-- Implement the Security, Device, and Network Managers.
+**Milestone 4 - In Progress**
+- Implemented the Security Manager with users, roles, permissions, authorization,
+  security alerts, and an append-only audit log.
+- Exposed security events and audit records through simulation results and the
+  Security Manager dashboard workspace.
+- Device and Network Managers remain planned.
 - Integrate all six managers through the simulation engine.
 - Complete the remaining dashboard workspaces.
 - Expand independent manager and system integration testing.
@@ -1117,3 +1121,23 @@ and a 60% fault rate. Both process 5 references. Comparison inputs and results
 are separate from the active simulation and its exports. Comparing does not
 start, advance, or reset that simulation. Editing comparison inputs clears the
 previous comparison table.
+
+## Security Manager
+
+Issue #43 is implemented as an optional role-based access-control manager.
+Open the **Security Manager** dashboard tab and set `enabled` to `true` in the
+JSON policy to activate it. The process ID is the username for file requests.
+Create roles with permission strings such as `file:read`, `file:write`,
+`file:*`, or `*`, then assign those roles to users. Users without roles are
+denied protected operations. Path-scoped permissions such as
+`file:/private/*:read` are also supported.
+
+The Security Manager supplies File Manager authorization, records every
+allowed/denied decision, emits warning-level alerts for denials, and retains an
+append-only audit log across simulation resets. Results include `security_users`,
+`security_roles`, `security_events`, `security_alerts`, and `audit_log`; security
+events are also included in the shared `events` list. Security is disabled by
+default to preserve existing simulation workloads. See
+[docs/security_manager.md](docs/security_manager.md) for the policy format,
+API details, and examples. This is an instructional RBAC simulation, not a
+production authentication or security system.

@@ -646,7 +646,64 @@
 
         <div id="security" class="page">
             <h1>Security Manager</h1>
-            <p>Security manager prototype.</p>
+            <p>Configure role-based access control (RBAC), then review authorization decisions, alerts, and the append-only audit history.</p>
+
+            <section class="card">
+                <h2>Security Policy Configuration</h2>
+                <p>Process IDs are the usernames used by File Manager requests. Security is disabled unless <code>enabled</code> is set to <code>true</code>. When enabled, users without a matching permission are denied by default.</p>
+                <label for="security-config">Security configuration (JSON)</label>
+                <textarea id="security-config" rows="15" spellcheck="false">{
+  "enabled": false,
+  "roles": [
+    {"name": "admin", "permissions": ["*"]},
+    {"name": "reader", "permissions": ["file:read", "file:list", "file:metadata"]}
+  ],
+  "users": [
+    {"username": "P1", "roles": ["admin"]},
+    {"username": "P2", "roles": ["reader"]}
+  ]
+}</textarea>
+                <p id="security-config-error" class="field-error" role="alert"></p>
+                <p><strong>Permission examples:</strong> <code>file:read</code>, <code>file:write</code>, <code>file:*</code>, <code>*</code>, and path-scoped rules such as <code>file:/private/*:read</code>.</p>
+            </section>
+
+            <section class="card">
+                <h2>Security Status</h2>
+                <p id="security-status" role="status">Start a simulation to view the active security policy.</p>
+                <div class="table-container">
+                    <table class="process-table" aria-label="Security users">
+                        <thead><tr><th scope="col">Username</th><th scope="col">Roles</th><th scope="col">Status</th></tr></thead>
+                        <tbody id="security-users-body"><tr><td colspan="3">No user data available.</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="table-container">
+                    <table class="process-table" aria-label="Security roles and permissions">
+                        <thead><tr><th scope="col">Role</th><th scope="col">Permissions</th></tr></thead>
+                        <tbody id="security-roles-body"><tr><td colspan="2">No role data available.</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Security Events and Alerts</h2>
+                <div class="table-container">
+                    <table class="process-table" aria-label="Security events">
+                        <thead><tr><th scope="col">Time</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Resource</th><th scope="col">Outcome</th><th scope="col">Details</th></tr></thead>
+                        <tbody id="security-events-body"><tr><td colspan="6">No security events recorded.</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Append-only Audit Log</h2>
+                <p>Audit records are retained by the Security Manager when the simulation is reset.</p>
+                <div class="table-container">
+                    <table class="process-table" aria-label="Security audit log">
+                        <thead><tr><th scope="col">Time</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Outcome</th><th scope="col">Details</th></tr></thead>
+                        <tbody id="security-audit-body"><tr><td colspan="6">No audit records available.</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
         </div>
 
         <div id="device" class="page">
@@ -689,6 +746,7 @@
     <script src="memory-input.js"></script>
     <script src="file-input.js"></script>
     <script src="memory-comparison.js"></script>
+    <script src="security-manager.js"></script>
 
 </body>
 </html>

@@ -79,3 +79,63 @@ def test_blocking_requests_reach_the_engine(client):
         ("unblock", "WAITING", "READY", 4),
     ]
     assert process.blocked_time == 3
+
+
+def test_security_policy_is_loaded_and_authorizes_file_request(client):
+    payload = scenario(file_requests={"0": "CREATE /api-note.txt"})
+    payload["security"] = {
+        "enabled": True,
+        "roles": [{"name": "creator", "permissions": ["file:create"]}],
+        "users": [{"username": "P1", "roles": ["creator"]}],
+    }
+
+    started = client.post("/api/start", json=payload)
+    assert started.status_code == 200
+    assert started.get_json()["security_enabled"] is True
+
+    response = client.post("/api/run")
+    assert response.status_code == 200
+    results = response.get_json()
+    assert results["security_users"] == [
+        {"username": "P1", "roles": ["creator"], "active": True}
+    ]
+    assert len(results["security_events"]) == 1
+    assert results["security_events"][0]["outcome"] == "allowed"
+    assert any(event["manager"] == "security" for event in results["events"])
+    assert results["audit_log"]
+
+
+def test_security_policy_is_deny_by_default_for_unassigned_process(client):
+    payload = scenario(file_requests={"0": "CREATE /blocked.txt"})
+    payload["security"] = {
+        "enabled": True,
+        "roles": [{"name": "reader", "permissions": ["file:read"]}],
+        "users": [],
+    }
+    assert client.post("/api/start", json=payload).status_code == 200
+
+    results = client.post("/api/run").get_json()
+    assert results["security_users"] == [
+        {"username": "P1", "roles": [], "active": True}
+    ]
+    assert results["security_alerts"][0]["outcome"] == "denied"
+    file_event = next(event for event in results["events"] if event["manager"] == "file")
+    assert file_event["outcome"] == "error"
+
+
+def test_invalid_security_configuration_is_rejected_without_replacing_engine(client):
+    initial = client.post("/api/start", json=scenario())
+    assert initial.status_code == 200
+    existing_engine = simulator_api.engine
+
+    payload = scenario()
+    payload["security"] = {
+        "enabled": True,
+        "roles": [{"name": "reader", "permissions": ["malformed"]}],
+        "users": [],
+    }
+    response = client.post("/api/start", json=payload)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+    assert simulator_api.engine is existing_engine

@@ -366,9 +366,30 @@ function collectSimulationInput() {
         algorithm: algorithm,
         configuration: configuration,
         processes: processCopies,
-        memory: collectMemoryConfiguration()
+        memory: collectMemoryConfiguration(),
+        security: collectSecurityConfiguration()
     };
 }
+
+function collectSecurityConfiguration() {
+    const text = document.getElementById("security-config").value;
+    let configuration;
+    try {
+        configuration = JSON.parse(text);
+    } catch (error) {
+        const notice = document.getElementById("security-config-error");
+        notice.textContent = "Security configuration must contain valid JSON.";
+        throw new Error("Correct the Security Manager JSON configuration before starting.");
+    }
+    if (!configuration || typeof configuration !== "object" || Array.isArray(configuration)) {
+        document.getElementById("security-config-error").textContent =
+            "Security configuration must be a JSON object.";
+        throw new Error("Correct the Security Manager JSON configuration before starting.");
+    }
+    document.getElementById("security-config-error").textContent = "";
+    return configuration;
+}
+
 
 function readWholeNumber(inputId, fieldName, minimum) {
     const input = document.getElementById(inputId);
@@ -396,7 +417,8 @@ let resultsJson = "";
 const initialResultDisplays = Array.from(document.querySelectorAll(
     ".simulation-results .metric p, #process-metrics-body, #gantt-chart, #gantt-empty, " +
     "#memory .metric p, #memory-frame-grid, #memory-mapping-body, #memory-history-body, " +
-    "#memory-transition-body, #file-storage-used, #file-tree-container, #file-activity-body"
+    "#memory-transition-body, #file-storage-used, #file-tree-container, #file-activity-body, " +
+    "#security-status, #security-users-body, #security-roles-body, #security-events-body, #security-audit-body"
 ), element => ({element, initial: element.cloneNode(true)}));
 
 function inputChanged() {
@@ -422,7 +444,8 @@ function lockWorkloadEditing() {
     lockedWorkloadControls = Array.from(document.querySelectorAll(
         "#process input, #process select, #process-form button, #process-table-body button, " +
         "#memory input, #memory select, #memory button, " +
-        "#file-request-form input, #file-request-form textarea, #file-request-form select, #file-request-form button, #file-request-table-body button"
+        "#file-request-form input, #file-request-form textarea, #file-request-form select, #file-request-form button, #file-request-table-body button, " +
+        "#security-config"
     )).filter(control => !control.closest("#memory-comparison"))
         .map(control => ({control, disabled: control.disabled}));
     for (const {control} of lockedWorkloadControls) control.disabled = true;
@@ -470,6 +493,7 @@ async function sendRequest(action, data = {}) {
 function showResults(result) {
     renderMemoryManager(result);
     renderFileManager(result);
+    renderSecurityManager(result);
     resultsJson = JSON.stringify(result, null, 4);
     updateManagerExportButtons();
     updateManagerTestButtons();
@@ -683,6 +707,10 @@ document.getElementById("pause-button").onclick = pauseSimulation;
 document.getElementById("step-button").onclick = stepSimulation;
 document.getElementById("reset-button").onclick = resetSimulation;
 document.getElementById("export-results-button").onclick = exportResults;
+document.getElementById("security-config").addEventListener("input", function () {
+    inputChanged();
+    document.getElementById("security-config-error").textContent = "";
+});
 
 function collectConfiguration(algorithm) {
     const configuration = {

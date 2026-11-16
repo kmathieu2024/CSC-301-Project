@@ -1,0 +1,350 @@
+"""Role-based access control and security auditing for the OS simulator.
+
+The manager is intentionally small and deterministic.  It is suitable for a
+teaching simulator, not as a replacement for operating-system credentials or
+production security controls.
+"""
+from __future__ import annotations
+
+from fnmatch import fnmatchcase
+from typing import Iterable
+
+
+class SecurityError(ValueError):
+    """Base class for invalid security configuration or operations."""
+
+
+class SecurityManager:
+    """Manage users, roles, permissions, authorization, alerts, and auditing.
+
+    Permissions use ``resource:action`` strings, for example ``file:read``.
+    Wildcards are supported (``*``, ``file:*``), as are path-scoped rules such
+    as ``file:/private/*:read``. Authorization is deny-by-default.
+
+    The ``authorize`` method implements the interface consumed by FileManager.
+    Audit records are append-only; callers receive copies rather than the
+    manager's internal record dictionaries.
+    """
+
+    def __init__(self) -> None:
+        self._users: dict[str, dict[str, object]] = {}
+        self._roles: dict[str, set[str]] = {}
+        self._security_events: list[dict[str, object]] = []
+        self._audit_log: list[dict[str, object]] = []
+        self.current_time: int | float = 0
+        self.scenario_id = "default"
+
+    @staticmethod
+    def _validate_name(name: str, kind: str) -> str:
+        if not isinstance(name, str) or not name.strip():
+            raise SecurityError(f"{kind} name must be a non-empty string")
+        if name != name.strip():
+            raise SecurityError(f"{kind} name cannot contain surrounding whitespace")
+        return name
+
+    @staticmethod
+    def _normalize_permission(permission: str) -> str:
+        if not isinstance(permission, str) or not permission.strip():
+            raise SecurityError("Permissions must be non-empty strings")
+        normalized = permission.strip().lower()
+        if normalized == "*" or normalized.endswith(":*"):
+            return normalized
+        parts = normalized.split(":")
+        if len(parts) == 2 and all(parts):
+            return normalized
+        if len(parts) >= 3 and parts[0] and parts[-1] and ":".join(parts[1:-1]):
+            # Middle component is a path pattern; ':' is allowed in paths.
+            return normalized
+        raise SecurityError(
+            "Permission must be '*', 'resource:*', 'resource:action', "
+            "or 'resource:/path/pattern:action'"
+        )
+
+    def set_context(self, timestamp: int | float, scenario_id: str = "default") -> None:
+        """Set the simulation timestamp attached to subsequent security events."""
+        if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+            raise ValueError("Security event timestamp must be numeric")
+        if timestamp < 0:
+            raise ValueError("Security event timestamp cannot be negative")
+        if not isinstance(scenario_id, str) or not scenario_id:
+            raise ValueError("scenario_id must be a non-empty string")
+        self.current_time = timestamp
+        self.scenario_id = scenario_id
+
+    def _record_audit(
+        self,
+        action: str,
+        actor: str,
+        target: str,
+        outcome: str = "success",
+        message: str = "",
+    ) -> None:
+        self._audit_log.append({
+            "timestamp": self.current_time,
+            "manager": "security",
+            "event_type": "audit",
+            "actor": actor,
+            "entity_id": target,
+            "action": action,
+            "outcome": outcome,
+            "message": message,
+            "scenario_id": self.scenario_id,
+        })
+
+    def _record_security_event(
+        self,
+        user: str,
+        action: str,
+        path: str,
+        resource: str,
+        allowed: bool,
+        message: str,
+    ) -> None:
+        event = {
+            "timestamp": self.current_time,
+            "manager": "security",
+            "event_type": "authorization" if allowed else "security_alert",
+            "entity_id": user,
+            "action": action,
+            "resource_type": resource,
+            "resource": path,
+            "outcome": "allowed" if allowed else "denied",
+            "severity": "info" if allowed else "warning",
+            "message": message,
+            "scenario_id": self.scenario_id,
+        }
+        self._security_events.append(event)
+        # Each authorization decision is also a durable audit record.
+        self._audit_log.append({
+            "timestamp": event["timestamp"],
+            "manager": "security",
+            "event_type": event["event_type"],
+            "actor": user,
+            "entity_id": user,
+            "action": action,
+            "resource_type": resource,
+            "resource": path,
+            "outcome": event["outcome"],
+            "message": message,
+            "scenario_id": self.scenario_id,
+        })
+
+    def create_role(
+        self,
+        name: str,
+        permissions: Iterable[str] = (),
+        *,
+        actor: str = "system",
+    ) -> None:
+        """Create a role with an initial set of permission strings."""
+        name = self._validate_name(name, "Role")
+        if name in self._roles:
+            raise SecurityError(f"Role already exists: {name}")
+        if isinstance(permissions, (str, bytes)):
+            raise SecurityError("Role permissions must be an iterable of strings")
+        try:
+            normalized = {self._normalize_permission(item) for item in permissions}
+        except TypeError as exc:
+            raise SecurityError("Role permissions must be an iterable of strings") from exc
+        self._roles[name] = normalized
+        self._record_audit("create_role", actor, name)
+
+    def add_user(
+        self,
+        username: str,
+        roles: Iterable[str] = (),
+        *,
+        actor: str = "system",
+    ) -> None:
+        """Register a user and optionally assign existing roles."""
+        username = self._validate_name(username, "User")
+        if username in self._users:
+            raise SecurityError(f"User already exists: {username}")
+        if isinstance(roles, (str, bytes)):
+            raise SecurityError("User roles must be an iterable of role names")
+        try:
+            assigned = set(roles)
+        except TypeError as exc:
+            raise SecurityError("User roles must be an iterable of role names") from exc
+        if any(not isinstance(role, str) or role not in self._roles for role in assigned):
+            raise SecurityError("Every assigned role must already exist")
+        self._users[username] = {"roles": assigned, "active": True}
+        self._record_audit("add_user", actor, username)
+        for role in sorted(assigned):
+            self._record_audit("assign_role", actor, f"{username}:{role}")
+
+    def remove_user(self, username: str, *, actor: str = "system") -> None:
+        """Remove a user account while retaining its audit history."""
+        if username not in self._users:
+            raise SecurityError(f"Unknown user: {username}")
+        del self._users[username]
+        self._record_audit("remove_user", actor, username)
+
+    def delete_role(self, role: str, *, actor: str = "system") -> None:
+        """Delete a role that is not currently assigned to any user."""
+        if role not in self._roles:
+            raise SecurityError(f"Unknown role: {role}")
+        if any(role in account["roles"] for account in self._users.values()):
+            raise SecurityError(f"Cannot delete assigned role: {role}")
+        del self._roles[role]
+        self._record_audit("delete_role", actor, role)
+
+    def assign_role(self, username: str, role: str, *, actor: str = "system") -> None:
+        """Assign an existing role to an existing user."""
+        if username not in self._users:
+            raise SecurityError(f"Unknown user: {username}")
+        if role not in self._roles:
+            raise SecurityError(f"Unknown role: {role}")
+        roles = self._users[username]["roles"]
+        assert isinstance(roles, set)
+        if role in roles:
+            raise SecurityError(f"User {username} already has role {role}")
+        roles.add(role)
+        self._record_audit("assign_role", actor, f"{username}:{role}")
+
+    def revoke_role(self, username: str, role: str, *, actor: str = "system") -> None:
+        """Remove a role assignment from a user."""
+        if username not in self._users:
+            raise SecurityError(f"Unknown user: {username}")
+        roles = self._users[username]["roles"]
+        assert isinstance(roles, set)
+        if role not in roles:
+            raise SecurityError(f"User {username} does not have role {role}")
+        roles.remove(role)
+        self._record_audit("revoke_role", actor, f"{username}:{role}")
+
+    def grant_permission(
+        self, role: str, permission: str, *, actor: str = "system"
+    ) -> None:
+        """Add a permission to an existing role."""
+        if role not in self._roles:
+            raise SecurityError(f"Unknown role: {role}")
+        normalized = self._normalize_permission(permission)
+        self._roles[role].add(normalized)
+        self._record_audit("grant_permission", actor, f"{role}:{normalized}")
+
+    def revoke_permission(
+        self, role: str, permission: str, *, actor: str = "system"
+    ) -> None:
+        """Remove a permission from an existing role."""
+        if role not in self._roles:
+            raise SecurityError(f"Unknown role: {role}")
+        normalized = self._normalize_permission(permission)
+        if normalized not in self._roles[role]:
+            raise SecurityError(f"Role {role} does not grant {normalized}")
+        self._roles[role].remove(normalized)
+        self._record_audit("revoke_permission", actor, f"{role}:{normalized}")
+
+    def disable_user(self, username: str, *, actor: str = "system") -> None:
+        """Disable an account without deleting its history or role assignments."""
+        if username not in self._users:
+            raise SecurityError(f"Unknown user: {username}")
+        self._users[username]["active"] = False
+        self._record_audit("disable_user", actor, username)
+
+    def enable_user(self, username: str, *, actor: str = "system") -> None:
+        """Re-enable a previously disabled account."""
+        if username not in self._users:
+            raise SecurityError(f"Unknown user: {username}")
+        self._users[username]["active"] = True
+        self._record_audit("enable_user", actor, username)
+
+    def _permission_matches(
+        self, permission: str, resource: str, action: str, path: str
+    ) -> bool:
+        if permission in {"*", f"{resource}:*", f"{resource}:{action}"}:
+            return True
+        prefix = f"{resource}:"
+        suffix = f":{action}"
+        if permission.startswith(prefix) and permission.endswith(suffix):
+            path_pattern = permission[len(prefix):-len(suffix)]
+            if path_pattern:
+                return fnmatchcase(path, path_pattern)
+        return False
+
+    def authorize(
+        self, user: object, action: str, path: str, resource: str = "file"
+    ) -> bool:
+        """Return whether a user may perform a FileManager action on a path.
+
+        Unknown users and users with no matching permission are denied. Every
+        decision creates both a security event and an audit record.
+        """
+        username = str(user) if user is not None else "anonymous"
+        if not isinstance(action, str) or not action.strip():
+            raise ValueError("Authorization action must be a non-empty string")
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("Authorization resource must be a non-empty path")
+        if not isinstance(resource, str) or not resource.strip():
+            raise ValueError("Authorization resource type must be a non-empty string")
+        action = action.strip().lower()
+        resource = resource.strip().lower()
+
+        account = self._users.get(username)
+        if account is None:
+            allowed = False
+            message = f"Unknown user '{username}' was denied {action} access to {path}"
+        elif not account["active"]:
+            allowed = False
+            message = f"Disabled user '{username}' was denied {action} access to {path}"
+        else:
+            roles = account["roles"]
+            assert isinstance(roles, set)
+            permissions = set()
+            for role in roles:
+                permissions.update(self._roles[role])
+            allowed = any(
+                self._permission_matches(permission, resource, action, path)
+                for permission in permissions
+            )
+            message = (
+                f"User '{username}' is authorized to {action} {path}"
+                if allowed else
+                f"User '{username}' lacks {resource}:{action} permission for {path}"
+            )
+
+        self._record_security_event(
+            username, action, path, resource, allowed, message
+        )
+        return allowed
+
+    @property
+    def users(self) -> list[dict[str, object]]:
+        """Return a JSON-safe snapshot of configured users and role assignments."""
+        return [
+            {
+                "username": username,
+                "roles": sorted(account["roles"]),
+                "active": bool(account["active"]),
+            }
+            for username, account in sorted(self._users.items())
+        ]
+
+    @property
+    def roles(self) -> list[dict[str, object]]:
+        """Return a JSON-safe snapshot of roles and their permissions."""
+        return [
+            {"name": name, "permissions": sorted(permissions)}
+            for name, permissions in sorted(self._roles.items())
+        ]
+
+    @property
+    def security_events(self) -> tuple[dict[str, object], ...]:
+        """Return a defensive copy of all authorization events and alerts."""
+        return tuple(event.copy() for event in self._security_events)
+
+    @property
+    def security_alerts(self) -> tuple[dict[str, object], ...]:
+        """Return a defensive copy of denied authorization events."""
+        return tuple(
+            event.copy() for event in self._security_events
+            if event["event_type"] == "security_alert"
+        )
+
+    @property
+    def audit_log(self) -> tuple[dict[str, object], ...]:
+        """Return a defensive copy of the append-only audit history."""
+        return tuple(record.copy() for record in self._audit_log)
+
+
+__all__ = ["SecurityError", "SecurityManager"]
