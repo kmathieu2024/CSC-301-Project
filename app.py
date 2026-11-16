@@ -1,4 +1,5 @@
 import json
+import math
 import re
 
 from flask import Flask, request, jsonify, send_from_directory
@@ -60,6 +61,11 @@ def validate_blocking_requests(requests, burst):
         offset = int(key)
         if offset > 9007199254740991 or not 0 <= offset < burst:
             raise ValueError("Invalid blocking offset")
+        if (isinstance(duration, bool)
+                or not isinstance(duration, (int, float))
+                or duration <= 0
+                or (isinstance(duration, float) and not math.isfinite(duration))):
+            raise ValueError("Blocking duration must be a positive finite number")
         validated[offset] = duration
     return validated
 

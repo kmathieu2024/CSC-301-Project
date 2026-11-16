@@ -83,6 +83,23 @@ def test_invalid_blocking_requests_are_rejected(client, requests):
     assert simulator_api.engine is None
 
 
+@pytest.mark.parametrize("duration", [True, False, "2", None, 0, -1, float("nan"), float("inf"), -float("inf")])
+def test_invalid_blocking_durations_are_rejected(client, duration):
+    with pytest.raises(ValueError, match="Blocking duration must be a positive finite number"):
+        simulator_api.validate_blocking_requests({"0": duration}, 3)
+    response = client.post("/api/start", json=scenario(blocking_requests={"0": duration}))
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "Blocking duration must be a positive finite number"
+    assert simulator_api.engine is None
+
+
+@pytest.mark.parametrize("duration", [1, 0.5])
+def test_positive_blocking_durations_are_accepted(client, duration):
+    response = client.post("/api/start", json=scenario(blocking_requests={"0": duration}))
+    assert response.status_code == 200
+    assert simulator_api.engine.processes[0].blocking_requests == {0: duration}
+
+
 def test_blocking_and_memory_requests_share_a_workload(client):
     workload = scenario(blocking_requests={"1": 3}, memory_references={"0": 0})
     workload["memory"]["fault_latency"] = 2
