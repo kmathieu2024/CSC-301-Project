@@ -200,17 +200,9 @@ def test_same_timestamp_reference_order_and_cumulative_latency(page, dashboard_u
 
 
 
-def test_generic_block_is_not_presented_as_a_page_fault(page, dashboard_url, monkeypatch):
-    import app as application
-    from src.core.process import Process
-
-    # /api/start does not forward blocking_requests. Inject the supported model
-    # input through a test-only factory; keep the real API, engine and UI path.
-    def process_with_generic_block(*args, **kwargs):
-        return Process(*args, blocking_requests={0: 2}, **kwargs)
-
-    monkeypatch.setattr(application, "Process", process_with_generic_block)
-    load(page, dashboard_url, [{"pid": "P1", "arrival_time": 0, "burst_time": 3}])
+def test_generic_block_is_not_presented_as_a_page_fault(page, dashboard_url):
+    load(page, dashboard_url, [{"pid": "P1", "arrival_time": 0, "burst_time": 3,
+                                "blocking_requests": {"0": 2}}])
     responses = []
     page.on("response", lambda response: responses.append(response)
             if response.url.endswith("/api/step") else None)
