@@ -6,8 +6,8 @@ developed by a six-member team.
 
 The simulator models several operating system components,
 including process management, memory management, file systems,
-and parallel computing. Security, device management, and
-networking are planned for subsequent development milestones.
+device management, and parallel computing. Security and networking
+remain planned work.
 
 The project uses a Python simulation backend, Flask API,
 and an interactive HTML, CSS, and JavaScript dashboard to
@@ -34,7 +34,7 @@ event-based integration between managers.
     - memory/: Memory management and page replacement
     - file/: File system operations
     - security/: Security Manager (planned)
-    - device/: Device Manager (planned)
+    - device/: Device models, scheduling, execution, and metrics
     - network/: Network Manager (planned)
   - parallel/: Multicore simulation and synchronization demonstrations
 - dashboard/: HTML, CSS, and JavaScript user interface
@@ -151,9 +151,13 @@ See docs/git_workflow.md for details.
 - Continuing dashboard input controls, manager comparisons,
   and visualization improvements.
 
-**Milestone 4 - Planned**
-- Implement the Security, Device, and Network Managers.
-- Integrate all six managers through the simulation engine.
+**Milestone 4 - In Progress**
+- Implemented the Device Manager, simulation engine integration,
+  Flask workload parsing, and dashboard configuration/results.
+- Added deterministic device workloads, expected results,
+  and independent manager, integration, API, and browser tests.
+- Security and Network Managers remain planned.
+- Complete integration of all six managers through the simulation engine.
 - Complete the remaining dashboard workspaces.
 - Expand independent manager and system integration testing.
 - Finalize performance experiments, documentation,
@@ -875,7 +879,11 @@ The `dashboard-milestone-3` branch (PR #62) adds:
 These additional features are documented in the Memory
 Manager and File Manager sections above. 
 
-The Security, Device, Network, Parallel Computing,
+The Device Manager workspace includes configuration, request editing,
+device status, histories, timelines, and performance metrics.
+See Device Manager inputs and execution below.
+
+The Security, Network, Parallel Computing,
 Scenario Builder, Testing Center, and Results pages
 still require further implementation.
 
@@ -1117,3 +1125,198 @@ and a 60% fault rate. Both process 5 references. Comparison inputs and results
 are separate from the active simulation and its exports. Comparing does not
 start, advance, or reset that simulation. Editing comparison inputs clears the
 previous comparison table.
+
+## Device Manager inputs and execution
+
+The Device Manager supports disks, printers, and keyboards. Device configuration
+is immutable and separate from runtime queues, active operations, and history.
+
+| Device type | Operations | Scheduling policies |
+|---|---|---|
+| `DISK` | `READ`, `WRITE` | `FCFS`, `SSTF`, `SCAN` |
+| `PRINTER` | `PRINT` | `FCFS` |
+| `KEYBOARD` | `READ` | `FCFS` |
+
+FCFS selects by submission timestamp, then deterministic sequence number. SSTF
+selects the nearest cylinder to the committed disk head, breaking ties by that
+same arrival order. SSTF has no aging and can starve distant requests. SCAN serves
+the current cylinder first, then the nearest request in its direction. When work
+remains only behind the head, it travels to the physical endpoint before reversing;
+this is SCAN, not LOOK. An empty queue causes no unnecessary endpoint travel.
+
+### JSON workload configuration
+
+Upload workloads through Process Manager or pass them to `POST /api/start`.
+The existing `/api/step`, `/api/run`, and `/api/reset` controls also handle devices.
+The following complete input configures one SCAN disk and one request:
+
+```json
+{
+  "algorithm": "FCFS",
+  "configuration": {"context_switch_cost": 0},
+  "memory": {"enabled": false},
+  "devices": [
+    {
+      "device_id": "disk0",
+      "device_type": "DISK",
+      "policy": "SCAN",
+      "default_service_time": 2,
+      "disk": {
+        "min_cylinder": 0,
+        "max_cylinder": 99,
+        "initial_head": 50,
+        "initial_direction": "UP",
+        "seek_time_per_cylinder": 1
+      }
+    }
+  ],
+  "processes": [
+    {
+      "pid": "P1",
+      "arrival_time": 0,
+      "burst_time": 4,
+      "device_requests": {
+        "1": {
+          "device_id": "disk0",
+          "operation": "READ",
+          "cylinder": 82,
+          "service_time": 2
+        }
+      }
+    }
+  ]
+}
+```
+
+Device IDs must be unique. Enum values are uppercase strings. Policy defaults to
+`FCFS`; default service time is 1. Disks require `disk` bounds and an initial head:
+`min_cylinder < max_cylinder`, with the head and request cylinders inside those
+inclusive bounds. Initial direction defaults to `UP` and may be `DOWN`; seek time
+per cylinder defaults to 1. Printers and keyboards prohibit disk geometry and
+request cylinders. Seek and service durations must be finite, nonnegative numbers;
+zero duration is supported, and booleans are rejected as numeric inputs. JSON
+cylinders and CPU offsets must fit JavaScript's nonnegative safe integer range.
+
+Request maps belong inside their process. Keys are canonical integer strings such
+as `"0"` or `"1"`, representing CPU time already executed, not global time. Each
+offset must be less than the CPU burst, with at most one synchronous device request
+per offset. An omitted request service time uses the device default. Unknown
+devices, incompatible operations, malformed enums, and offset aliases are rejected.
+Flask constructs typed `DeviceRequestSpec` objects through `json_inputs.py` and
+validates the complete candidate before replacing the accepted simulation. Missing
+`devices` and `device_requests` retain existing workloads without device I/O.
+
+### Engine integration and lifecycle
+
+Python callers pass `DeviceManager(configs)` as the optional `device_manager`
+argument to `SimulationEngine`; `Process(..., device_requests={offset: spec})`
+uses integer offsets and preserves existing positional constructor arguments.
+The engine alone owns simulated time, CPU scheduling, and Process transitions.
+DeviceManager owns request queues, scheduling, operations, notifications, and
+device accounting. It receives explicit timestamps rather than advancing time.
+
+At a shared CPU offset, file operations, explicit blocking, and memory references
+retain their existing order; device submission follows them and occurs once.
+Submission queues the request and changes RUNNING to WAITING. The engine schedules
+token/generation-protected device callbacks. Disk seek completion commits the head
+and starts service; it does not wake the process. A terminal notification wakes
+only the matching request's process, adds its actual blocked duration once, and
+calls the CPU scheduler's ready callback. Interrupt delivery has zero CPU overhead;
+existing scheduler rules decide preemption. Different devices can run concurrently,
+while each device serializes its own operations.
+
+Requests transition from QUEUED to ACTIVE, then COMPLETED, FAILED, or CANCELLED.
+Activation (`start_time`) is when a request leaves its queue and begins seek or
+service. `service_start_time` marks service after any seek and may follow
+activation. Committed seek, service, and SCAN endpoint operations are not preempted
+by new arrivals. Requests at cylinders passed during movement wait for a later
+scheduling boundary.
+
+Failure aborts active work, fails active and queued requests, invalidates callbacks,
+and preserves the last committed head position. Explicit recovery restores IDLE,
+preserving head and direction without retries. Cancellation removes queued work or
+aborts active request work; terminal cancellation is an idempotent no-op. Aborted
+seeks do not commit partial head movement, although elapsed busy time remains
+counted. Canceling queued work does not interrupt committed endpoint travel.
+OFFLINE is allowed only for an idle device with an empty queue; explicit online
+restoration is required before submissions resume.
+
+`reset()` restores initial device geometry and availability, clears request history
+and metrics, and changes callback generation. Engine reset also clears device waits,
+outcomes, and callbacks and restores Process state; existing File Manager reset
+behavior preserves its file system. Standalone lifecycle methods include
+`cancel_request`, `fail_device`, `recover_device`, `set_offline`, and `set_online`.
+These actions currently have no separate Flask endpoints or dashboard controls.
+
+### Metrics, snapshots, and dashboard
+
+All durations and timestamps use simulated time units. Disk movement uses cylinders.
+Request metrics include submission, activation, service start, terminal time, queue
+wait, elapsed seek/service time, turnaround, outcome, and failure/cancellation reason.
+Queue wait ends at activation; turnaround runs from submission through terminal
+completion, including queue wait and seek. Seek/service costs include elapsed work
+before an abort. Average request waiting time uses all terminal requests, including
+failed and canceled requests.
+
+Per-device metrics include submitted/completed/failed/canceled counts, pending and
+active work, busy/idle/unavailable time, queue statistics, movement, and terminal
+notification count. Busy, idle, and unavailable time partition elapsed time since
+the run epoch. Utilization is `busy / elapsed * 100` percent, including unavailable
+time in the denominator. Throughput is successful completions per elapsed unit.
+Time-weighted average queue length is pending-queue area divided by elapsed time;
+the active request is excluded. Maximum queue length records the largest pending
+count. Zero-elapsed backend rates are zero; the dashboard shows them as unavailable
+until elapsed time is positive.
+
+SCAN endpoint travel counts once toward device busy time and committed head
+movement. It is separate from request seek/service costs, and reversal adds no
+duration. Snapshot/metric reads on DeviceManager project partial accounting without
+mutating its runtime. Exceptional arithmetic intermediates retain exact values;
+final derived metrics outside the representable float range become JSON `null`,
+including nonzero underflow. Ordinary calculations retain their existing precision.
+The dashboard displays unavailable metrics as `—`, without a percent sign. A mean
+utilization is unavailable if any contributing device utilization is unavailable;
+genuine numeric zero utilization displays `0%` when elapsed time is positive.
+
+Engine/API results include `devices`, `device_requests`, `device_metrics`,
+`device_events`, `device_timeline`, and `device_outcomes`. Callback tokens and
+generations remain internal. Device Manager controls add/remove configurations and
+edit process requests, with conditional disk geometry and operation choices.
+Results show device states, committed head/direction, queues, request history and
+filters, metrics, and timelines for queue wait, seek, service, endpoint travel, and
+abort events. Run/Step/Reset and existing results export include device data.
+Rejected imports preserve accepted inputs, results, and drafts.
+
+### Deterministic demonstration and limitations
+
+Use **Load device demonstration** in Device Manager, or import
+[`test_data/milestone4/devices.json`](test_data/milestone4/devices.json).
+Its three devices and three processes complete 12 requests with final time 319:
+
+| Device | Completed requests | Busy time | Head movement |
+|---|---:|---:|---:|
+| Disk | 5 | 316 | 306 |
+| Printer | 4 | 12 | 0 |
+| Keyboard | 3 | 3 | 0 |
+
+See [device expected results](test_data/expected_results/device_expected.md) for
+interval arithmetic, SCAN reversals, queue waits, and process blocking totals.
+Independent queued-cylinder fixtures (0–99, head 50, UP, requests 60/20/70) produce
+movement of 100 for FCFS, 70 for SSTF, and 128 for SCAN.
+
+Only one synchronous device request per CPU offset is supported. There is no SSTF
+aging or automatic retry. Positive operation durations must advance their floating
+point timestamp, and derived due times must be finite. Execution failures return
+HTTP 400 with `code: "simulation_failed"` and `reset_required: true`; subsequent
+Step/Run calls retain the original error until reset. Reset does not repair invalid
+input, which must be corrected before repeating the run.
+
+Known architectural limitation **DM-A07** remains: healthy-run
+`SimulationEngine.results()` can deliver pending external device notifications,
+wake processes, and schedule work. It is not a side-effect-free inspection method.
+Standalone callers should deliver failure/cancellation at the engine's current
+timestamp and explicitly call `check_arrivals()` before reading results. A future
+explicit notification-delivery boundary needs separate review before Network
+Manager integration; it has not been refactored here. Security and Network Managers
+remain planned, and original instructor rubric compliance has not been verified
+against an available authoritative handout.
