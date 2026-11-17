@@ -271,6 +271,36 @@ def test_unavailable_and_zero_utilization_display(
         expect(idle.locator("td").nth(6)).to_have_text("0%")
 
 
+def test_combined_blocking_device_memory_file_import_and_run(
+    page: Page, device_url: str,
+) -> None:
+    """Merged blocking inputs survive the UI together with all existing I/O maps."""
+    data = peripheral_workload(3)
+    data["memory"] = {"enabled": True, "frame_count": 1, "page_size": 4,
+                      "fault_latency": 1}
+    data["processes"][0].update(
+        burst_time=2, blocking_requests={"0": 2}, memory_references={"0": 0},
+        file_requests={"0": "CREATE /combined"},
+    )
+    page.goto(device_url)
+    tab(page, "Process")
+    upload_json(page, data)
+    expect(page.locator("#process-table-body")).to_contain_text("P1")
+    collected = page.evaluate("collectSimulationInput()")
+    for key in ("blocking_requests", "device_requests", "memory_references",
+                "file_requests"):
+        assert collected["processes"][0][key] == data["processes"][0][key]
+    run(page)
+    result = page.evaluate("JSON.parse(resultsJson)")
+    assert result["current_time"] == 8
+    assert result["processes"][0]["blocked_time"] == 6
+    assert result["memory_metrics"]["references"] == 1
+    assert result["device_metrics"]["devices"]["disk0"]["submitted"] == 1
+    assert result["device_metrics"]["devices"]["disk0"]["completed"] == 1
+    assert result["file_tree"]["children"][0]["name"] == "combined"
+    assert len([e for e in result["events"] if e["manager"] == "file"]) == 1
+
+
 def test_busy_controls_and_accepted_changes_invalidate_results(
     page: Page, device_url: str,
 ) -> None:
