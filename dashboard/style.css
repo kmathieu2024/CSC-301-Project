@@ -543,3 +543,38 @@ input[aria-invalid="true"] {
 .manager-test-controls { margin-bottom: 24px; }
 .manager-test-controls .test-pass { color: #166534; font-weight: bold; }
 .manager-test-controls .test-fail { color: #b42318; font-weight: bold; }
+
+/* Device workspace uses existing cards, tables, controls, and state badges. */
+#device .card + .card { margin-top: 24px; }
+#device select, #device input[type="search"] {
+    padding: 10px; border: 1px solid #b8bdcc; border-radius: 6px;
+    width: 100%; font: inherit;
+}
+#device fieldset { border: 1px solid #d4d2df; border-radius: 8px; margin: 20px 0; }
+#device .field-error { color: #b42318; }
+#device button:focus-visible, #device input:focus-visible, #device select:focus-visible {
+    outline: 3px solid #6c55f7; outline-offset: 3px;
+}
+#device button:disabled { opacity: .6; cursor: not-allowed; }
+.device-history { max-height: 450px; overflow: auto; }
+#device table { font-size: 14px; }
+#device caption { text-align: left; font-weight: bold; padding: 12px 0; }
+.device-state-idle { background: #dcfce7; color: #166534; }
+.device-state-busy { background: #fef3c7; color: #92400e; }
+.device-state-offline { background: #e5e7eb; color: #374151; }
+.device-state-failed { background: #fee2e2; color: #991b1b; }
+.device-track { background: #f3f4f6; height: 16px; overflow: hidden; }
+.device-bar { height: 16px; min-width: 3px; border: 1px solid #4c496d; }
+.device-timeline-row { margin: 12px 0; font-size: 14px; }
+.device-wait, .device-legend .device-wait { background: #e5e7eb; }
+.device-seek, .device-legend .device-seek { background: #bfdbfe; }
+.device-service, .device-legend .device-service { background: #bbf7d0; }
+.device-endpoint, .device-legend .device-endpoint { background: #ddd6fe; }
+.device-failure, .device-legend .device-failure { background: #fecaca; }
+@media (max-width: 850px) {
+    body { flex-direction: column; }
+    .sidebar { width: 100%; min-height: auto; padding: 12px; }
+    .nav { display: inline-block; width: auto; }
+    .content { padding: 18px; }
+    .cards { grid-template-columns: 1fr; }
+}

@@ -1,18 +1,47 @@
 import json
 import math
 import re
+from typing import Any
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, Response, request, jsonify, send_from_directory
 
 from src.core.process import Process
-from src.core.simulation import SimulationEngine
+from src.core.simulation import SimulationEngine, SimulationExecutionError
 from src.managers.memory.memory_manager import MemoryManager
+from src.managers.device import DeviceManager
+from src.managers.device.json_inputs import parse_device_configs, parse_device_requests
 
 
 app = Flask(__name__)
 
 # Store the current simulation.
 engine = None
+
+
+def _simulation_response(result: dict[str, Any]) -> Response:
+    """Serialize derived nonfinite numbers as null, never nonstandard JSON tokens.
+
+    Managers retain responsibility for numerically stable metrics; this boundary
+    also protects existing CPU fields and future snapshot additions.
+    """
+    def safe(value: Any) -> Any:
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, dict):
+            return {key: safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [safe(item) for item in value]
+        return value
+
+    return jsonify(safe(result))
+
+
+def _execution_failure(error: SimulationExecutionError) -> tuple[Response, int]:
+    """Report a persistent, reset-required failure without a Python traceback."""
+    return _simulation_response({
+        "error": str(error), "code": "simulation_failed", "reset_required": True,
+        "cause": engine.execution_error,
+    }), 400
 
 
 @app.route("/")
@@ -22,6 +51,8 @@ def dashboard():
 
 @app.route("/<path:filename>")
 def dashboard_files(filename):
+    if filename == "device-demo.json":
+        return send_from_directory("test_data/milestone4", "devices.json")
     return send_from_directory("dashboard", filename)
 
 
@@ -80,6 +111,9 @@ def start():
             raise ValueError("Simulation input must be an object")
         if "memory_references" in data:
             raise ValueError("Memory references must belong to an existing process")
+        if "device_requests" in data:
+            raise ValueError("Device requests must belong to an existing process")
+        device_configs = parse_device_configs(data.get("devices", []))
 
         # Get the processes from the dashboard.
         processes = []
@@ -99,7 +133,10 @@ def start():
                 file_requests={
                     int(offset): command
                     for offset, command in item.get("file_requests", {}).items()
-                }
+                },
+                device_requests=parse_device_requests(
+                    item.get("device_requests", {}), item["burst_time"], device_configs,
+                ),
             )
 
             processes.append(process)
@@ -130,16 +167,20 @@ def start():
             raise ValueError("Memory policy must be fifo or lru")
         if memory_config.get("enabled", True):
             memory_manager = MemoryManager(**memory_settings)
-        engine = SimulationEngine(
+        candidate = SimulationEngine(
             processes,
             algorithm=data["algorithm"],
             quantum=config.get("time_quantum", 4),
             aging_interval=config.get("aging_interval", 4),
             context_switch=config.get("context_switch_cost", 0),
-            memory_manager=memory_manager
+            memory_manager=memory_manager,
+            device_manager=DeviceManager(list(device_configs.values()))
+            if device_configs else None,
         )
 
-        return jsonify(engine.results())
+        result = _simulation_response(candidate.results())
+        engine = candidate
+        return result
 
     except (ValueError, TypeError, KeyError, AttributeError) as error:
         return jsonify({"error": str(error)}), 400
@@ -185,7 +226,12 @@ def step():
     if engine is None:
         return jsonify({"error": "Start the simulation first"}), 400
 
-    return jsonify(engine.step())
+    try:
+        return _simulation_response(engine.step())
+    except SimulationExecutionError as error:
+        return _execution_failure(error)
+    except (ValueError, TypeError, OverflowError) as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route("/api/run", methods=["POST"])
@@ -193,7 +239,12 @@ def run():
     if engine is None:
         return jsonify({"error": "Start the simulation first"}), 400
 
-    return jsonify(engine.run())
+    try:
+        return _simulation_response(engine.run())
+    except SimulationExecutionError as error:
+        return _execution_failure(error)
+    except (ValueError, TypeError, OverflowError) as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route("/api/reset", methods=["POST"])
@@ -203,7 +254,7 @@ def reset():
 
     engine.reset()
 
-    return jsonify(engine.results())
+    return _simulation_response(engine.results())
 
 
 if __name__ == "__main__":
