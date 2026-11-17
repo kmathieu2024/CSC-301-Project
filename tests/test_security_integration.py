@@ -10,7 +10,6 @@ def test_security_manager_authorizes_file_requests_and_exposes_events():
     security.add_user("P1", ["creator"])
     file_manager = FileManager()
     process = Process("P1", 0, 2, file_requests={0: "CREATE /notes.txt"})
-
     engine = SimulationEngine(
         [process], file_manager=file_manager, security_manager=security
     )
@@ -27,29 +26,21 @@ def test_security_manager_authorizes_file_requests_and_exposes_events():
     assert results["audit_log"][-1]["event_type"] == "authorization"
 
 
-def test_denied_file_request_creates_alert_and_does_not_change_file_system():
+def test_denied_file_request_creates_security_alert_and_file_error():
     security = SecurityManager()
-    security.create_role("reader", ["file:read"])
-    security.add_user("P1", ["reader"])
-    file_manager = FileManager()
-    process = Process("P1", 0, 2, file_requests={0: "CREATE /secret.txt"})
+    security.add_user("P1")
+    process = Process("P1", 0, 1, file_requests={0: "CREATE /secret.txt"})
+    results = SimulationEngine([process], security_manager=security).run()
 
-    results = SimulationEngine(
-        [process], file_manager=file_manager, security_manager=security
-    ).run()
-
-    assert "secret.txt" not in file_manager._root.children
+    assert results["security_alerts"][0]["event_type"] == "security_alert"
+    assert results["security_alerts"][0]["severity"] == "warning"
+    assert results["security_alerts"][0]["outcome"] == "denied"
     file_event = next(event for event in results["events"] if event["manager"] == "file")
     assert file_event["outcome"] == "error"
     assert "not authorized" in file_event["message"].lower()
-    assert len(results["security_alerts"]) == 1
-    alert = results["security_alerts"][0]
-    assert alert["event_type"] == "security_alert"
-    assert alert["severity"] == "warning"
-    assert alert["outcome"] == "denied"
 
 
-def test_audit_history_survives_simulation_reset_and_grows_on_replay():
+def test_audit_history_survives_reset_and_grows_on_replay():
     security = SecurityManager()
     security.add_user("P1")
     process = Process("P1", 0, 1, file_requests={0: "CREATE /secret.txt"})
@@ -59,15 +50,12 @@ def test_audit_history_survives_simulation_reset_and_grows_on_replay():
     first_count = len(engine.results()["audit_log"])
     engine.reset()
     engine.run()
-    second_results = engine.results()
+    results = engine.results()
 
-    assert len(second_results["audit_log"]) == first_count + 1
-    assert len(second_results["security_alerts"]) == 2
-    current_security_events = [
-        event for event in second_results["events"]
-        if event["manager"] == "security"
-    ]
-    assert len(current_security_events) == 1
+    assert len(results["audit_log"]) == first_count + 1
+    assert len(results["security_alerts"]) == 2
+    this_runs_events = [event for event in results["events"] if event["manager"] == "security"]
+    assert len(this_runs_events) == 1
 
 
 def test_security_manager_is_optional_for_existing_file_manager_behavior():

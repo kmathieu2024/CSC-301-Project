@@ -1,5 +1,12 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.managers.device import DeviceRequestSpec
 
 
 class ProcessState(Enum):
@@ -28,6 +35,10 @@ class Process:
     blocking_requests: dict[int, float] = field(default_factory=dict)
     # CPU-time offsets mapped to file-system commands.
     file_requests: dict[int, str] = field(default_factory=dict)
+    # Synchronous device inputs; keyword-only to preserve all positional fields.
+    device_requests: dict[int, DeviceRequestSpec] = field(
+        default_factory=dict, kw_only=True,
+    )
 
     # Simulation state
     remaining_time: int = 0
@@ -44,6 +55,9 @@ class Process:
     def __post_init__(self):
         """Initialize values that depend on process input."""
         self.remaining_time = self.burst_time
+        if not isinstance(self.device_requests, Mapping):
+            raise ValueError("device_requests must be an offset-to-spec mapping")
+        self.device_requests = dict(self.device_requests)
 
     def reset(self):
         """Reset the process so the simulation can run again."""

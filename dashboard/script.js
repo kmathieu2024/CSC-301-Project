@@ -115,6 +115,7 @@ processForm.addEventListener("submit", function (event) {
 
 // Rebuild the table using the current processes.
 function renderProcessTable() {
+    renderDeviceInputs();
     renderReferenceEditor();
     renderFileRequestEditor();
     processTableBody.replaceChildren();
@@ -186,6 +187,9 @@ function loadWorkload(data) {
     }
 
     validateMemoryAssociations(data);
+    if (Object.hasOwn(data, "device_requests"))
+        throw new Error("Place device_requests inside an existing process.");
+    const importedDevices = validateDevices(data.devices);
     const importedMemory = validateMemory(data.memory);
     const importedConfiguration = data.configuration;
     if (importedConfiguration !== undefined) {
@@ -260,6 +264,17 @@ function loadWorkload(data) {
                 process.memory_references === undefined ? {} : process.memory_references,
                 process.burst_time
             ),
+            ...(process.blocking_requests === undefined ? {} : {
+                blocking_requests: validateBlockingRequests(
+                    process.blocking_requests,
+                    process.burst_time
+                )
+            }),
+            ...(process.device_requests === undefined ? {} : {
+                device_requests: validateDeviceRequests(
+                    process.device_requests, process.burst_time, importedDevices
+                )
+            }),
             file_requests: validateFileRequests(
                 process.file_requests === undefined ? {} : process.file_requests,
                 process.burst_time
@@ -274,6 +289,8 @@ function loadWorkload(data) {
     // Update the dashboard only after every process passes validation.
     // Clear Add drafts too: they have no fileRequestEdit object for redraw cleanup.
     cancelFileRequestEdit();
+    configuredDevices.splice(0, configuredDevices.length, ...importedDevices);
+    clearDeviceDrafts();
     applyMemoryConfiguration(importedMemory);
     if (importedConfiguration) {
         for (const [key, id] of [["context_switch_cost", "context-switch-cost"], ["time_quantum", "time-quantum"], ["aging_interval", "aging-interval"]]) {
@@ -354,6 +371,11 @@ function collectSimulationInput() {
                 process.memory_references === undefined ? {} : process.memory_references,
                 process.burst_time
             ),
+            ...(process.device_requests === undefined ? {} : {
+                device_requests: validateDeviceRequests(
+                    process.device_requests, process.burst_time
+                )
+            }),
             file_requests: validateFileRequests(
                 process.file_requests === undefined ? {} : process.file_requests,
                 process.burst_time
@@ -366,6 +388,7 @@ function collectSimulationInput() {
         algorithm: algorithm,
         configuration: configuration,
         processes: processCopies,
+        ...(configuredDevices.length ? {devices: validateDevices(configuredDevices)} : {}),
         memory: collectMemoryConfiguration(),
         security: collectSecurityConfiguration()
     };
@@ -377,8 +400,8 @@ function collectSecurityConfiguration() {
     try {
         configuration = JSON.parse(text);
     } catch (error) {
-        const notice = document.getElementById("security-config-error");
-        notice.textContent = "Security configuration must contain valid JSON.";
+        document.getElementById("security-config-error").textContent =
+            "Security configuration must contain valid JSON.";
         throw new Error("Correct the Security Manager JSON configuration before starting.");
     }
     if (!configuration || typeof configuration !== "object" || Array.isArray(configuration)) {
@@ -389,7 +412,6 @@ function collectSecurityConfiguration() {
     document.getElementById("security-config-error").textContent = "";
     return configuration;
 }
-
 
 function readWholeNumber(inputId, fieldName, minimum) {
     const input = document.getElementById(inputId);
@@ -422,6 +444,7 @@ const initialResultDisplays = Array.from(document.querySelectorAll(
 ), element => ({element, initial: element.cloneNode(true)}));
 
 function inputChanged() {
+    clearDeviceResults();
     clearManagerTestMode();
     started = false;
     savedInput = "";
@@ -444,6 +467,7 @@ function lockWorkloadEditing() {
     lockedWorkloadControls = Array.from(document.querySelectorAll(
         "#process input, #process select, #process-form button, #process-table-body button, " +
         "#memory input, #memory select, #memory button, " +
+        "#device form input, #device form select, #device form button, #device-config-body button, #device-input-body button, #load-device-demo, " +
         "#file-request-form input, #file-request-form textarea, #file-request-form select, #file-request-form button, #file-request-table-body button, " +
         "#security-config"
     )).filter(control => !control.closest("#memory-comparison"))
@@ -454,6 +478,7 @@ function lockWorkloadEditing() {
 function unlockWorkloadEditing() {
     for (const {control, disabled} of lockedWorkloadControls) control.disabled = disabled;
     lockedWorkloadControls = [];
+    document.getElementById("load-device-demo").disabled = busy || deviceDemoLoading;
 }
 
 
@@ -491,6 +516,7 @@ async function sendRequest(action, data = {}) {
 
 // Show simulation progress.
 function showResults(result) {
+    renderDeviceResults(result);
     renderMemoryManager(result);
     renderFileManager(result);
     renderSecurityManager(result);
@@ -504,7 +530,8 @@ function showResults(result) {
     }).length;
 
     const total = result.processes.length;
-    const finished = total > 0 && completed === total;
+    const deviceWork = Object.values(result.devices || {}).some(d => d.active_operation || d.queue.length);
+    const finished = total > 0 && completed === total && !deviceWork;
     renderManagerTestResult(result, finished);
     document.getElementById("step-button").disabled = finished;
 
@@ -562,6 +589,11 @@ function exportResults() {
 
 // Start the simulation if needed.
 async function startSimulation() {
+    if (!validateDeviceDrafts()) {
+        showPage("device", document.querySelector("button[onclick*=\"'device'\"]"));
+        document.querySelector('#device .field-error:not(:empty)')?.focus();
+        return false;
+    }
     if (!validateConfiguration()) {
         document.querySelector('input[aria-invalid="true"]').focus();
         return false;

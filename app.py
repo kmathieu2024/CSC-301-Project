@@ -1,11 +1,15 @@
 import json
+import math
 import re
+from typing import Any
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, Response, request, jsonify, send_from_directory
 
 from src.core.process import Process
-from src.core.simulation import SimulationEngine
+from src.core.simulation import SimulationEngine, SimulationExecutionError
 from src.managers.memory.memory_manager import MemoryManager
+from src.managers.device import DeviceManager
+from src.managers.device.json_inputs import parse_device_configs, parse_device_requests
 from src.managers.security import SecurityManager
 
 
@@ -16,11 +20,11 @@ engine = None
 
 
 def build_security_manager(config, process_ids):
-    """Build optional RBAC policy from the simulation input document.
+    """Build an optional role-based access-control policy from API input.
 
-    Security remains opt-in for backward compatibility. When enabled, every
-    process is registered as a user; users omitted from the supplied policy
-    receive no roles and are therefore denied protected operations.
+    Security is opt-in for backward compatibility. When enabled, every process
+    becomes a user; process IDs omitted from the policy receive no roles and are
+    therefore denied protected operations by default.
     """
     if config is None:
         return None
@@ -71,6 +75,32 @@ def build_security_manager(config, process_ids):
     return manager
 
 
+def _simulation_response(result: dict[str, Any]) -> Response:
+    """Serialize derived nonfinite numbers as null, never nonstandard JSON tokens.
+
+    Managers retain responsibility for numerically stable metrics; this boundary
+    also protects existing CPU fields and future snapshot additions.
+    """
+    def safe(value: Any) -> Any:
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, dict):
+            return {key: safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [safe(item) for item in value]
+        return value
+
+    return jsonify(safe(result))
+
+
+def _execution_failure(error: SimulationExecutionError) -> tuple[Response, int]:
+    """Report a persistent, reset-required failure without a Python traceback."""
+    return _simulation_response({
+        "error": str(error), "code": "simulation_failed", "reset_required": True,
+        "cause": engine.execution_error,
+    }), 400
+
+
 @app.route("/")
 def dashboard():
     return send_from_directory("dashboard", "index.html")
@@ -78,6 +108,8 @@ def dashboard():
 
 @app.route("/<path:filename>")
 def dashboard_files(filename):
+    if filename == "device-demo.json":
+        return send_from_directory("test_data/milestone4", "devices.json")
     return send_from_directory("dashboard", filename)
 
 
@@ -106,6 +138,26 @@ def validate_memory_references(references, burst):
     return validated
 
 
+def validate_blocking_requests(requests, burst):
+    """Convert canonical CPU offsets while preserving blocking durations."""
+    if not isinstance(requests, dict):
+        raise ValueError("blocking_requests must be an offset-to-duration object")
+    validated = {}
+    for key, duration in requests.items():
+        if not re.fullmatch(r"0|[1-9][0-9]*", key):
+            raise ValueError("Blocking offset must be a canonical nonnegative integer")
+        offset = int(key)
+        if offset > 9007199254740991 or not 0 <= offset < burst:
+            raise ValueError("Invalid blocking offset")
+        if (isinstance(duration, bool)
+                or not isinstance(duration, (int, float))
+                or duration <= 0
+                or (isinstance(duration, float) and not math.isfinite(duration))):
+            raise ValueError("Blocking duration must be a positive finite number")
+        validated[offset] = duration
+    return validated
+
+
 @app.route("/api/start", methods=["POST"])
 def start():
     global engine
@@ -116,6 +168,9 @@ def start():
             raise ValueError("Simulation input must be an object")
         if "memory_references" in data:
             raise ValueError("Memory references must belong to an existing process")
+        if "device_requests" in data:
+            raise ValueError("Device requests must belong to an existing process")
+        device_configs = parse_device_configs(data.get("devices", []))
 
         # Get the processes from the dashboard.
         processes = []
@@ -129,10 +184,16 @@ def start():
                 memory_references=validate_memory_references(
                     item.get("memory_references", {}), item["burst_time"]
                 ),
+                blocking_requests=validate_blocking_requests(
+                    item.get("blocking_requests", {}), item["burst_time"]
+                ),
                 file_requests={
                     int(offset): command
                     for offset, command in item.get("file_requests", {}).items()
-                }
+                },
+                device_requests=parse_device_requests(
+                    item.get("device_requests", {}), item["burst_time"], device_configs,
+                ),
             )
 
             processes.append(process)
@@ -166,17 +227,21 @@ def start():
         security_manager = build_security_manager(
             data.get("security"), [process.pid for process in processes]
         )
-        engine = SimulationEngine(
+        candidate = SimulationEngine(
             processes,
             algorithm=data["algorithm"],
             quantum=config.get("time_quantum", 4),
             aging_interval=config.get("aging_interval", 4),
             context_switch=config.get("context_switch_cost", 0),
             memory_manager=memory_manager,
-            security_manager=security_manager
+            device_manager=DeviceManager(list(device_configs.values()))
+            if device_configs else None,
+            security_manager=security_manager,
         )
 
-        return jsonify(engine.results())
+        result = _simulation_response(candidate.results())
+        engine = candidate
+        return result
 
     except (ValueError, TypeError, KeyError, AttributeError) as error:
         return jsonify({"error": str(error)}), 400
@@ -222,7 +287,12 @@ def step():
     if engine is None:
         return jsonify({"error": "Start the simulation first"}), 400
 
-    return jsonify(engine.step())
+    try:
+        return _simulation_response(engine.step())
+    except SimulationExecutionError as error:
+        return _execution_failure(error)
+    except (ValueError, TypeError, OverflowError) as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route("/api/run", methods=["POST"])
@@ -230,7 +300,12 @@ def run():
     if engine is None:
         return jsonify({"error": "Start the simulation first"}), 400
 
-    return jsonify(engine.run())
+    try:
+        return _simulation_response(engine.run())
+    except SimulationExecutionError as error:
+        return _execution_failure(error)
+    except (ValueError, TypeError, OverflowError) as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.route("/api/reset", methods=["POST"])
@@ -240,7 +315,7 @@ def reset():
 
     engine.reset()
 
-    return jsonify(engine.results())
+    return _simulation_response(engine.results())
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-// Render the Security Manager data returned in each simulation snapshot.
+// Render Security Manager data returned in each simulation snapshot.
 function renderSecurityManager(results) {
     const status = document.getElementById("security-status");
     const usersBody = document.getElementById("security-users-body");

@@ -1,29 +1,27 @@
 """Role-based access control and security auditing for the OS simulator.
 
-The manager is intentionally small and deterministic.  It is suitable for a
-teaching simulator, not as a replacement for operating-system credentials or
+This manager is deliberately deterministic and small enough for an instructional
+simulator. It is not a substitute for operating-system credentials, sessions, or
 production security controls.
 """
 from __future__ import annotations
 
 from fnmatch import fnmatchcase
+import math
 from typing import Iterable
 
 
 class SecurityError(ValueError):
-    """Base class for invalid security configuration or operations."""
+    """Raised for invalid security configuration or management operations."""
 
 
 class SecurityManager:
     """Manage users, roles, permissions, authorization, alerts, and auditing.
 
-    Permissions use ``resource:action`` strings, for example ``file:read``.
-    Wildcards are supported (``*``, ``file:*``), as are path-scoped rules such
-    as ``file:/private/*:read``. Authorization is deny-by-default.
-
-    The ``authorize`` method implements the interface consumed by FileManager.
-    Audit records are append-only; callers receive copies rather than the
-    manager's internal record dictionaries.
+    Permissions use ``resource:action`` strings (for example ``file:read``).
+    ``*`` and resource wildcards (``file:*``) are supported, as are path-scoped
+    rules such as ``file:/private/*:read``. Unknown and unassigned users are
+    denied by default. Audit records are append-only and exposed as copies.
     """
 
     def __init__(self) -> None:
@@ -53,7 +51,6 @@ class SecurityManager:
         if len(parts) == 2 and all(parts):
             return normalized
         if len(parts) >= 3 and parts[0] and parts[-1] and ":".join(parts[1:-1]):
-            # Middle component is a path pattern; ':' is allowed in paths.
             return normalized
         raise SecurityError(
             "Permission must be '*', 'resource:*', 'resource:action', "
@@ -61,11 +58,10 @@ class SecurityManager:
         )
 
     def set_context(self, timestamp: int | float, scenario_id: str = "default") -> None:
-        """Set the simulation timestamp attached to subsequent security events."""
-        if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
-            raise ValueError("Security event timestamp must be numeric")
-        if timestamp < 0:
-            raise ValueError("Security event timestamp cannot be negative")
+        """Set the timestamp and scenario attached to subsequent events."""
+        if (isinstance(timestamp, bool) or not isinstance(timestamp, (int, float))
+                or not math.isfinite(timestamp) or timestamp < 0):
+            raise ValueError("Security event timestamp must be a nonnegative finite number")
         if not isinstance(scenario_id, str) or not scenario_id:
             raise ValueError("scenario_id must be a non-empty string")
         self.current_time = timestamp
@@ -114,7 +110,7 @@ class SecurityManager:
             "scenario_id": self.scenario_id,
         }
         self._security_events.append(event)
-        # Each authorization decision is also a durable audit record.
+        # Each authorization decision is also recorded in the durable audit log.
         self._audit_log.append({
             "timestamp": event["timestamp"],
             "manager": "security",
@@ -130,13 +126,9 @@ class SecurityManager:
         })
 
     def create_role(
-        self,
-        name: str,
-        permissions: Iterable[str] = (),
-        *,
-        actor: str = "system",
+        self, name: str, permissions: Iterable[str] = (), *, actor: str = "system"
     ) -> None:
-        """Create a role with an initial set of permission strings."""
+        """Create a role with an initial collection of permission strings."""
         name = self._validate_name(name, "Role")
         if name in self._roles:
             raise SecurityError(f"Role already exists: {name}")
@@ -150,13 +142,9 @@ class SecurityManager:
         self._record_audit("create_role", actor, name)
 
     def add_user(
-        self,
-        username: str,
-        roles: Iterable[str] = (),
-        *,
-        actor: str = "system",
+        self, username: str, roles: Iterable[str] = (), *, actor: str = "system"
     ) -> None:
-        """Register a user and optionally assign existing roles."""
+        """Register a user and optionally assign roles that already exist."""
         username = self._validate_name(username, "User")
         if username in self._users:
             raise SecurityError(f"User already exists: {username}")
@@ -174,14 +162,14 @@ class SecurityManager:
             self._record_audit("assign_role", actor, f"{username}:{role}")
 
     def remove_user(self, username: str, *, actor: str = "system") -> None:
-        """Remove a user account while retaining its audit history."""
+        """Remove an account while retaining its historical audit records."""
         if username not in self._users:
             raise SecurityError(f"Unknown user: {username}")
         del self._users[username]
         self._record_audit("remove_user", actor, username)
 
     def delete_role(self, role: str, *, actor: str = "system") -> None:
-        """Delete a role that is not currently assigned to any user."""
+        """Delete a role only when it is not assigned to any user."""
         if role not in self._roles:
             raise SecurityError(f"Unknown role: {role}")
         if any(role in account["roles"] for account in self._users.values()):
@@ -213,9 +201,7 @@ class SecurityManager:
         roles.remove(role)
         self._record_audit("revoke_role", actor, f"{username}:{role}")
 
-    def grant_permission(
-        self, role: str, permission: str, *, actor: str = "system"
-    ) -> None:
+    def grant_permission(self, role: str, permission: str, *, actor: str = "system") -> None:
         """Add a permission to an existing role."""
         if role not in self._roles:
             raise SecurityError(f"Unknown role: {role}")
@@ -223,9 +209,7 @@ class SecurityManager:
         self._roles[role].add(normalized)
         self._record_audit("grant_permission", actor, f"{role}:{normalized}")
 
-    def revoke_permission(
-        self, role: str, permission: str, *, actor: str = "system"
-    ) -> None:
+    def revoke_permission(self, role: str, permission: str, *, actor: str = "system") -> None:
         """Remove a permission from an existing role."""
         if role not in self._roles:
             raise SecurityError(f"Unknown role: {role}")
@@ -236,7 +220,7 @@ class SecurityManager:
         self._record_audit("revoke_permission", actor, f"{role}:{normalized}")
 
     def disable_user(self, username: str, *, actor: str = "system") -> None:
-        """Disable an account without deleting its history or role assignments."""
+        """Disable an account without deleting it or its role assignments."""
         if username not in self._users:
             raise SecurityError(f"Unknown user: {username}")
         self._users[username]["active"] = False
@@ -249,26 +233,34 @@ class SecurityManager:
         self._users[username]["active"] = True
         self._record_audit("enable_user", actor, username)
 
-    def _permission_matches(
-        self, permission: str, resource: str, action: str, path: str
-    ) -> bool:
-        if permission in {"*", f"{resource}:*", f"{resource}:{action}"}:
+    @staticmethod
+    def _permission_matches(permission: str, resource: str, action: str, path: str) -> bool:
+        if permission == "*":
             return True
-        prefix = f"{resource}:"
-        suffix = f":{action}"
-        if permission.startswith(prefix) and permission.endswith(suffix):
-            path_pattern = permission[len(prefix):-len(suffix)]
-            if path_pattern:
-                return fnmatchcase(path, path_pattern)
+        parts = permission.split(":")
+        if len(parts) == 2:
+            permission_resource, permission_action = parts
+            return (permission_resource in (resource, "*")
+                    and permission_action in (action, "*"))
+        if len(parts) >= 3:
+            permission_resource = parts[0]
+            permission_path = ":".join(parts[1:-1])
+            permission_action = parts[-1]
+            return (
+                permission_resource in (resource, "*")
+                and permission_action in (action, "*")
+                and fnmatchcase(path.lower(), permission_path)
+            )
         return False
 
     def authorize(
-        self, user: object, action: str, path: str, resource: str = "file"
+        self, user: object, action: str, path: str, *, resource: str = "file"
     ) -> bool:
-        """Return whether a user may perform a FileManager action on a path.
+        """Return whether a user may perform an action on a resource.
 
-        Unknown users and users with no matching permission are denied. Every
-        decision creates both a security event and an audit record.
+        Unknown users and users without matching permission are denied. Every
+        decision creates a security event and an audit record. The default
+        ``resource`` is ``file`` to satisfy FileManager's authorizer interface.
         """
         username = str(user) if user is not None else "anonymous"
         if not isinstance(action, str) or not action.strip():
@@ -290,7 +282,7 @@ class SecurityManager:
         else:
             roles = account["roles"]
             assert isinstance(roles, set)
-            permissions = set()
+            permissions: set[str] = set()
             for role in roles:
                 permissions.update(self._roles[role])
             allowed = any(
@@ -303,26 +295,21 @@ class SecurityManager:
                 f"User '{username}' lacks {resource}:{action} permission for {path}"
             )
 
-        self._record_security_event(
-            username, action, path, resource, allowed, message
-        )
+        self._record_security_event(username, action, path, resource, allowed, message)
         return allowed
 
     @property
     def users(self) -> list[dict[str, object]]:
         """Return a JSON-safe snapshot of configured users and role assignments."""
         return [
-            {
-                "username": username,
-                "roles": sorted(account["roles"]),
-                "active": bool(account["active"]),
-            }
+            {"username": username, "roles": sorted(account["roles"]),
+             "active": bool(account["active"])}
             for username, account in sorted(self._users.items())
         ]
 
     @property
     def roles(self) -> list[dict[str, object]]:
-        """Return a JSON-safe snapshot of roles and their permissions."""
+        """Return a JSON-safe snapshot of roles and permissions."""
         return [
             {"name": name, "permissions": sorted(permissions)}
             for name, permissions in sorted(self._roles.items())
@@ -330,12 +317,12 @@ class SecurityManager:
 
     @property
     def security_events(self) -> tuple[dict[str, object], ...]:
-        """Return a defensive copy of all authorization events and alerts."""
+        """Return defensive copies of authorization events and alerts."""
         return tuple(event.copy() for event in self._security_events)
 
     @property
     def security_alerts(self) -> tuple[dict[str, object], ...]:
-        """Return a defensive copy of denied authorization events."""
+        """Return defensive copies of denied authorization events."""
         return tuple(
             event.copy() for event in self._security_events
             if event["event_type"] == "security_alert"

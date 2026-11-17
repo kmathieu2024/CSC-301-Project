@@ -20,10 +20,7 @@ Security is opt-in so existing simulator workloads remain compatible. Add a
     "enabled": true,
     "roles": [
       {"name": "admin", "permissions": ["*"]},
-      {
-        "name": "reader",
-        "permissions": ["file:read", "file:list", "file:metadata"]
-      },
+      {"name": "reader", "permissions": ["file:read", "file:list", "file:metadata"]},
       {"name": "private-reader", "permissions": ["file:/private/*:read"]}
     ],
     "users": [
@@ -35,51 +32,42 @@ Security is opt-in so existing simulator workloads remain compatible. Add a
 ```
 
 The process ID is used as the File Manager username. Process IDs not explicitly
-listed in `users` are registered without roles, which means protected requests
-are denied by default. All referenced roles must be defined before users are
-created.
+listed in `users` are registered without roles and denied protected requests.
+When `enabled` is false or the `security` object is omitted, File Manager retains
+its backward-compatible allow-all policy.
 
-Permission syntax:
+## Permissions
 
-- `*` grants every action for every resource.
-- `file:*` grants every file action.
-- `file:read` grants one action for the File Manager.
-- `file:/private/*:read` grants an action only for matching paths.
-- The resource prefix can be extended for other managers, for example
-  `device:open` or `network:send`, when those managers integrate with the same
-  authorization interface.
+Permissions use `resource:action` syntax. Examples include `file:read`,
+`file:write`, `file:*`, and `*`. Path-scoped permissions use
+`resource:/path/pattern:action`, such as `file:/private/*:read`. `fnmatch`-style
+path patterns are supported. Authorization is deny-by-default.
 
-Roles can be created with `create_role`, users with `add_user`, and role
-assignments can be changed with `assign_role` and `revoke_role`. Permissions can
-be changed with `grant_permission` and `revoke_permission`. Users can be
-suspended and re-enabled with `disable_user` and `enable_user`.
+## Management API
+
+The manager exposes `create_role`, `delete_role`, `add_user`, `remove_user`,
+`assign_role`, `revoke_role`, `grant_permission`, `revoke_permission`,
+`disable_user`, and `enable_user`. `authorize(user, action, path)` implements the
+File Manager's policy interface. Other manager integrations can pass a resource
+type using `authorize(..., resource="device")`.
 
 ## Events and audit records
 
 Every authorization decision generates a security event and an audit record.
 Allowed decisions use event type `authorization`; denied decisions use
-`security_alert` with warning severity. User/role/permission configuration
+`security_alert` with warning severity. User, role, and permission configuration
 changes are also written to the audit log.
 
-`SimulationEngine.results()` and the Flask API expose:
+`SimulationEngine.results()` and the Flask API expose `security_enabled`,
+`security_users`, `security_roles`, `security_events`, `security_alerts`, and
+`audit_log`. Security events also enter the shared `events` collection with
+`manager: "security"`, including simulation timestamp and scenario ID. Resetting
+a simulation does not erase audit history; a replay appends new records.
 
-- `security_enabled`
-- `security_users` and `security_roles`
-- `security_events` and `security_alerts`
-- `audit_log`
-
-Security events also enter the shared `events` collection with
-`manager: "security"`, so integrations can consume a common event stream. Each
-record includes the simulation timestamp and scenario ID. Resetting a
-simulation does not erase the audit history; a replay appends new records.
-
-The dashboard's Security Manager tab accepts the same JSON policy and displays
-users, roles, authorization events, alerts, and audit records. The policy is
-included in exported simulation results.
-
-## Running the tests
+## Tests
 
 ```bash
 python -m pytest tests/test_security_manager.py tests/test_security_integration.py -v
+python -m pytest tests/test_api_inputs.py -v
 python -m pytest tests/ -v
 ```
