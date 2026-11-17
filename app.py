@@ -1,6 +1,6 @@
 import json
-import re
 import math
+import re
 from typing import Any
 
 from flask import Flask, Response, request, jsonify, send_from_directory
@@ -81,6 +81,26 @@ def validate_memory_references(references, burst):
     return validated
 
 
+def validate_blocking_requests(requests, burst):
+    """Convert canonical CPU offsets while preserving blocking durations."""
+    if not isinstance(requests, dict):
+        raise ValueError("blocking_requests must be an offset-to-duration object")
+    validated = {}
+    for key, duration in requests.items():
+        if not re.fullmatch(r"0|[1-9][0-9]*", key):
+            raise ValueError("Blocking offset must be a canonical nonnegative integer")
+        offset = int(key)
+        if offset > 9007199254740991 or not 0 <= offset < burst:
+            raise ValueError("Invalid blocking offset")
+        if (isinstance(duration, bool)
+                or not isinstance(duration, (int, float))
+                or duration <= 0
+                or (isinstance(duration, float) and not math.isfinite(duration))):
+            raise ValueError("Blocking duration must be a positive finite number")
+        validated[offset] = duration
+    return validated
+
+
 @app.route("/api/start", methods=["POST"])
 def start():
     global engine
@@ -106,6 +126,9 @@ def start():
                 item.get("priority", 1),
                 memory_references=validate_memory_references(
                     item.get("memory_references", {}), item["burst_time"]
+                ),
+                blocking_requests=validate_blocking_requests(
+                    item.get("blocking_requests", {}), item["burst_time"]
                 ),
                 file_requests={
                     int(offset): command

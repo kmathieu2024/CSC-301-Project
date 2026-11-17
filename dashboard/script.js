@@ -264,6 +264,12 @@ function loadWorkload(data) {
                 process.memory_references === undefined ? {} : process.memory_references,
                 process.burst_time
             ),
+            ...(process.blocking_requests === undefined ? {} : {
+                blocking_requests: validateBlockingRequests(
+                    process.blocking_requests,
+                    process.burst_time
+                )
+            }),
             ...(process.device_requests === undefined ? {} : {
                 device_requests: validateDeviceRequests(
                     process.device_requests, process.burst_time, importedDevices
