@@ -107,3 +107,57 @@ def test_blocking_and_memory_requests_share_a_workload(client):
     result = client.post("/api/run").get_json()
     assert result["memory_metrics"]["faults"] == 1
     assert simulator_api.engine.processes[0].blocked_time == 5
+
+
+def test_security_policy_is_loaded_and_authorizes_file_request(client):
+    payload = scenario(file_requests={"0": "CREATE /api-note.txt"})
+    payload["security"] = {
+        "enabled": True,
+        "roles": [{"name": "creator", "permissions": ["file:create"]}],
+        "users": [{"username": "P1", "roles": ["creator"]}],
+    }
+
+    started = client.post("/api/start", json=payload)
+    assert started.status_code == 200
+    assert started.get_json()["security_enabled"] is True
+
+    response = client.post("/api/run")
+    assert response.status_code == 200
+    results = response.get_json()
+    assert results["security_users"] == [
+        {"username": "P1", "roles": ["creator"], "active": True}
+    ]
+    assert len(results["security_events"]) == 1
+    assert results["security_events"][0]["outcome"] == "allowed"
+    assert any(event["manager"] == "security" for event in results["events"])
+    assert results["audit_log"]
+
+
+def test_security_policy_denies_unassigned_process_by_default(client):
+    payload = scenario(file_requests={"0": "CREATE /blocked.txt"})
+    payload["security"] = {
+        "enabled": True,
+        "roles": [{"name": "reader", "permissions": ["file:read"]}],
+        "users": [],
+    }
+
+    assert client.post("/api/start", json=payload).status_code == 200
+    results = client.post("/api/run").get_json()
+    assert results["security_enabled"] is True
+    assert results["security_users"] == [
+        {"username": "P1", "roles": [], "active": True}
+    ]
+    assert results["security_alerts"][0]["outcome"] == "denied"
+    assert results["security_alerts"][0]["severity"] == "warning"
+    file_event = next(event for event in results["events"] if event["manager"] == "file")
+    assert file_event["outcome"] == "error"
+    assert "not authorized" in file_event["message"].lower()
+
+
+def test_security_policy_input_must_be_an_object(client):
+    payload = scenario()
+    payload["security"] = ["enabled"]
+    response = client.post("/api/start", json=payload)
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "Security settings must be an object"
+    assert simulator_api.engine is None

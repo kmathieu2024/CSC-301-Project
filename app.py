@@ -10,12 +10,69 @@ from src.core.simulation import SimulationEngine, SimulationExecutionError
 from src.managers.memory.memory_manager import MemoryManager
 from src.managers.device import DeviceManager
 from src.managers.device.json_inputs import parse_device_configs, parse_device_requests
+from src.managers.security import SecurityManager
 
 
 app = Flask(__name__)
 
 # Store the current simulation.
 engine = None
+
+
+def build_security_manager(config, process_ids):
+    """Build an optional role-based access-control policy from API input.
+
+    Security is opt-in for backward compatibility. When enabled, every process
+    becomes a user; process IDs omitted from the policy receive no roles and are
+    therefore denied protected operations by default.
+    """
+    if config is None:
+        return None
+    if not isinstance(config, dict):
+        raise ValueError("Security settings must be an object")
+    enabled = config.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("Security enabled must be boolean")
+    if not enabled:
+        return None
+
+    roles = config.get("roles", [])
+    users = config.get("users", [])
+    if not isinstance(roles, list):
+        raise ValueError("Security roles must be a list")
+    if not isinstance(users, list):
+        raise ValueError("Security users must be a list")
+
+    manager = SecurityManager()
+    for role in roles:
+        if not isinstance(role, dict):
+            raise ValueError("Each security role must be an object")
+        name = role.get("name")
+        permissions = role.get("permissions", [])
+        if not isinstance(permissions, list):
+            raise ValueError("Role permissions must be a list")
+        if any(not isinstance(permission, str) for permission in permissions):
+            raise ValueError("Role permissions must contain only strings")
+        manager.create_role(name, permissions, actor="configuration")
+
+    configured_users = set()
+    for user in users:
+        if not isinstance(user, dict):
+            raise ValueError("Each security user must be an object")
+        username = user.get("username")
+        assigned_roles = user.get("roles", [])
+        if not isinstance(assigned_roles, list):
+            raise ValueError("User roles must be a list")
+        if any(not isinstance(role_name, str) for role_name in assigned_roles):
+            raise ValueError("User roles must contain only strings")
+        manager.add_user(username, assigned_roles, actor="configuration")
+        configured_users.add(username)
+
+    for process_id in process_ids:
+        if process_id not in configured_users:
+            manager.add_user(process_id, actor="configuration")
+
+    return manager
 
 
 def _simulation_response(result: dict[str, Any]) -> Response:
@@ -167,6 +224,9 @@ def start():
             raise ValueError("Memory policy must be fifo or lru")
         if memory_config.get("enabled", True):
             memory_manager = MemoryManager(**memory_settings)
+        security_manager = build_security_manager(
+            data.get("security"), [process.pid for process in processes]
+        )
         candidate = SimulationEngine(
             processes,
             algorithm=data["algorithm"],
@@ -176,6 +236,7 @@ def start():
             memory_manager=memory_manager,
             device_manager=DeviceManager(list(device_configs.values()))
             if device_configs else None,
+            security_manager=security_manager,
         )
 
         result = _simulation_response(candidate.results())

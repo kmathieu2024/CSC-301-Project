@@ -578,3 +578,21 @@ input[aria-invalid="true"] {
     .content { padding: 18px; }
     .cards { grid-template-columns: 1fr; }
 }
+
+
+/* Security Manager policy editor and access-history tables. */
+#security .card + .card { margin-top: 24px; }
+#security-config {
+    display: block;
+    width: 100%;
+    max-width: 900px;
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid #b8bdcc;
+    border-radius: 6px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 14px;
+}
+#security .table-container { margin-top: 16px; }
+#security-events-body td:last-child,
+#security-audit-body td:last-child { white-space: pre-wrap; }

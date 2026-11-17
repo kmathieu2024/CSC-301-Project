@@ -6,8 +6,8 @@ developed by a six-member team.
 
 The simulator models several operating system components,
 including process management, memory management, file systems,
-device management, and parallel computing. Security and networking
-remain planned work.
+role-based security, device management, and parallel computing. Network
+management remains planned work.
 
 The project uses a Python simulation backend, Flask API,
 and an interactive HTML, CSS, and JavaScript dashboard to
@@ -33,7 +33,7 @@ event-based integration between managers.
     - process/: CPU scheduling algorithms
     - memory/: Memory management and page replacement
     - file/: File system operations
-    - security/: Security Manager (planned)
+    - security/: Role-based access control, authorization, alerts, and audit log
     - device/: Device models, scheduling, execution, and metrics
     - network/: Network Manager (planned)
   - parallel/: Multicore simulation and synchronization demonstrations
@@ -156,7 +156,11 @@ See docs/git_workflow.md for details.
   Flask workload parsing, and dashboard configuration/results.
 - Added deterministic device workloads, expected results,
   and independent manager, integration, API, and browser tests.
-- Security and Network Managers remain planned.
+- Implemented the Security Manager with users, roles, permissions, deny-by-default
+  authorization, security alerts, and append-only audit logging.
+- Exposed security events and audit records through simulation results and the
+  Security Manager dashboard workspace.
+- The Network Manager remains planned.
 - Complete integration of all six managers through the simulation engine.
 - Complete the remaining dashboard workspaces.
 - Expand independent manager and system integration testing.
@@ -1322,6 +1326,26 @@ wake processes, and schedule work. It is not a side-effect-free inspection metho
 Standalone callers should deliver failure/cancellation at the engine's current
 timestamp and explicitly call `check_arrivals()` before reading results. A future
 explicit notification-delivery boundary needs separate review before Network
-Manager integration; it has not been refactored here. Security and Network Managers
-remain planned, and original instructor rubric compliance has not been verified
+Manager integration; it has not been refactored here. Network Manager integration
+remains planned, and original instructor rubric compliance has not been verified
 against an available authoritative handout.
+
+
+## Security Manager
+
+Issue #43 is implemented as an optional role-based access-control manager. Open
+the **Security Manager** dashboard tab and set `enabled` to `true` in the JSON
+policy to activate it. Process IDs are the usernames for File Manager requests.
+Create roles with permissions such as `file:read`, `file:write`, `file:*`, or `*`,
+then assign those roles to users. Users without roles are denied protected
+operations. Path-scoped permissions such as `file:/private/*:read` are supported.
+
+The Security Manager supplies File Manager authorization, records allowed and
+denied decisions, emits warning-level alerts for denials, and retains an
+append-only audit log across simulation resets. Results include `security_users`,
+`security_roles`, `security_events`, `security_alerts`, and `audit_log`; security
+events also appear in the shared `events` list. Security is disabled by default
+to preserve existing simulation workloads. See
+[docs/security_manager.md](docs/security_manager.md) for the policy format, API
+details, and examples. This is an instructional RBAC simulation, not a production
+authentication or security system.
