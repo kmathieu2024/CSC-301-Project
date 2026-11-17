@@ -69,3 +69,40 @@ def test_security_manager_is_optional_for_existing_file_manager_behavior():
     file_events = [event for event in results["events"] if event["manager"] == "file"]
     assert len(file_events) == 1
     assert file_events[0]["outcome"] == "success"
+
+
+def test_unexpected_file_operation_exception_keeps_authorization_and_failure_events():
+    from src.core.simulation import SimulationExecutionError
+
+    class ExplodingFileManager(FileManager):
+        @staticmethod
+        def _check_permissions(node, action):
+            raise RuntimeError("unexpected permission backend failure")
+
+    security = SecurityManager()
+    security.create_role("creator", ["file:create"])
+    security.add_user("P1", ["creator"])
+    process = Process("P1", 0, 1, file_requests={0: "CREATE /notes.txt"})
+    engine = SimulationEngine(
+        [process], file_manager=ExplodingFileManager(), security_manager=security
+    )
+
+    try:
+        engine.run()
+    except SimulationExecutionError as error:
+        assert "unexpected permission backend failure" in str(error)
+    else:
+        raise AssertionError("The unexpected file operation exception should abort the run")
+
+    results = engine.results()
+    security_event = next(
+        event for event in results["events"] if event["manager"] == "security"
+    )
+    file_event = next(
+        event for event in results["events"] if event["manager"] == "file"
+    )
+    assert security_event["outcome"] == "allowed"
+    assert file_event["outcome"] == "error"
+    assert "unexpected permission backend failure" in file_event["message"]
+    assert results["audit_log"][-1]["event_type"] == "authorization"
+    assert results["audit_log"][-1]["outcome"] == "allowed"

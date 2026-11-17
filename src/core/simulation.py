@@ -526,37 +526,27 @@ class SimulationEngine:
                         self.security_manager.set_context(
                             self.current_time, self.scenario_id
                         )
-                    result = self.file_manager.execute_command(
-                        command,
-                        process_id=process.pid,
-                        user=process.pid,
-                    )
-                    if self.security_manager is not None:
-                        security_events = self.security_manager.security_events
-                        self.events.extend(
-                            event.copy()
-                            for event in security_events[self._security_event_cursor:]
+                    try:
+                        result = self.file_manager.execute_command(
+                            command,
+                            process_id=process.pid,
+                            user=process.pid,
                         )
-                        self._security_event_cursor = len(security_events)
-
-                    failed = (isinstance(result, str) and result.startswith("Error:")
-                              and getattr(self.file_manager, "_last_command_failed", True))
-
-                    self.events.append({
-                        "timestamp": self.current_time,
-                        "manager": "file",
-                        "event_type": "file_request",
-                        "entity_id": process.pid,
-                        "action": command,
-                        "previous_state": process.state.value,
-                        "new_state": process.state.value,
-                        "outcome": "error" if failed else "success",
-                        "duration": 0,
-                        "message": str(result) if result is not None else "",
-                        "scenario_id": self.scenario_id
-                    })
-
-                    self._files_done.add(key)
+                    except Exception as error:
+                        # Authorization is recorded before the file operation
+                        # mutates state. Preserve both records if a later,
+                        # unexpected exception aborts the simulation step.
+                        self._sync_security_events()
+                        self._append_file_request_event(
+                            process, command, error=error
+                        )
+                        raise
+                    else:
+                        self._sync_security_events()
+                        self._append_file_request_event(
+                            process, command, result=result
+                        )
+                        self._files_done.add(key)
                 if executed in process.blocking_requests and key not in self._blocks_done:
                     duration = process.blocking_requests[executed]
                     self._blocks_done.add(key)
@@ -738,6 +728,43 @@ class SimulationEngine:
             self.last_pid = process.pid
 
             yield self.results()
+
+    def _sync_security_events(self) -> None:
+        """Copy new authorization events into the simulation's unified stream."""
+        if self.security_manager is None:
+            return
+        security_events = self.security_manager.security_events
+        self.events.extend(
+            event.copy()
+            for event in security_events[self._security_event_cursor:]
+        )
+        self._security_event_cursor = len(security_events)
+
+    def _append_file_request_event(
+        self, process: Process, command: str, *, result=None,
+        error: Exception | None = None,
+    ) -> None:
+        """Record the file operation outcome separately from authorization."""
+        failed = error is not None or (
+            isinstance(result, str) and result.startswith("Error:")
+            and getattr(self.file_manager, "_last_command_failed", True)
+        )
+        message = str(error) if error is not None else (
+            str(result) if result is not None else ""
+        )
+        self.events.append({
+            "timestamp": self.current_time,
+            "manager": "file",
+            "event_type": "file_request",
+            "entity_id": process.pid,
+            "action": command,
+            "previous_state": process.state.value,
+            "new_state": process.state.value,
+            "outcome": "error" if failed else "success",
+            "duration": 0,
+            "message": message,
+            "scenario_id": self.scenario_id,
+        })
 
     def _has_device_work(self) -> bool:
         """Committed movement survives cancellation; invalid callbacks do not."""

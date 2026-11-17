@@ -113,3 +113,30 @@ def test_permission_updates_and_role_revocation_are_audited():
     assert security.authorize("alice", "list", "/") is False
     security.revoke_role("alice", "reader")
     assert security.authorize("alice", "read", "/notes.txt") is False
+
+
+def test_path_scoped_permissions_canonicalize_virtual_paths_and_preserve_case():
+    security = SecurityManager()
+    security.create_role("private_reader", ["file:/private/*:read"])
+    security.add_user("alice", ["private_reader"])
+
+    # These forms resolve to the same virtual path in FileManager.
+    assert security.authorize("alice", "read", "/private/./notes.txt") is True
+    assert security.authorize("alice", "read", "//private/sub/../notes.txt") is True
+
+    # Traversal is normalized before matching, so it cannot make an outside
+    # resource appear to be inside the permitted directory.
+    assert security.authorize("alice", "read", "/public/../private/notes.txt") is True
+    assert security.authorize("alice", "read", "/private/../public/secret.txt") is False
+
+    # FileManager names are case-sensitive; path permissions must be too.
+    assert security.authorize("alice", "read", "/Private/notes.txt") is False
+
+
+def test_path_permission_patterns_are_canonicalized_without_lowercasing_paths():
+    security = SecurityManager()
+    security.create_role("reader", ["file:/private/../Public/*:read"])
+    security.add_user("alice", ["reader"])
+
+    assert security.authorize("alice", "read", "/Public/readme.txt") is True
+    assert security.authorize("alice", "read", "/public/readme.txt") is False

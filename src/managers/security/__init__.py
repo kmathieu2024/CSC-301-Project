@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fnmatch import fnmatchcase
 import math
+import posixpath
 from typing import Iterable
 
 
@@ -41,17 +42,42 @@ class SecurityManager:
         return name
 
     @staticmethod
-    def _normalize_permission(permission: str) -> str:
+    def _canonicalize_path(path: str) -> str:
+        """Normalize virtual POSIX paths without changing their case.
+
+        FileManager treats repeated separators, ``.`` and ``..`` as path
+        syntax and clamps traversal at its virtual root. Match those semantics
+        before evaluating path-scoped permissions. A leading double slash is
+        collapsed because the simulator has one root, not POSIX network roots.
+        """
+        normalized = posixpath.normpath(path)
+        if path.startswith("/"):
+            return "/" + normalized.lstrip("/")
+        return normalized
+
+    @classmethod
+    def _normalize_permission(cls, permission: str) -> str:
+        """Normalize permission syntax while preserving path-name case."""
         if not isinstance(permission, str) or not permission.strip():
             raise SecurityError("Permissions must be non-empty strings")
-        normalized = permission.strip().lower()
-        if normalized == "*" or normalized.endswith(":*"):
-            return normalized
-        parts = normalized.split(":")
-        if len(parts) == 2 and all(parts):
-            return normalized
-        if len(parts) >= 3 and parts[0] and parts[-1] and ":".join(parts[1:-1]):
-            return normalized
+        value = permission.strip()
+        if value == "*":
+            return "*"
+        parts = value.split(":")
+        if len(parts) == 2 and all(part.strip() for part in parts):
+            resource, action = (part.strip().lower() for part in parts)
+            return f"{resource}:{action}"
+        if len(parts) >= 3 and parts[0].strip() and parts[-1].strip():
+            resource = parts[0].strip().lower()
+            path_pattern = ":".join(parts[1:-1]).strip()
+            action = parts[-1].strip().lower()
+            if not path_pattern:
+                raise SecurityError(
+                    "Permission must be '*', 'resource:*', 'resource:action', "
+                    "or 'resource:/path/pattern:action'"
+                )
+            path_pattern = cls._canonicalize_path(path_pattern)
+            return f"{resource}:{path_pattern}:{action}"
         raise SecurityError(
             "Permission must be '*', 'resource:*', 'resource:action', "
             "or 'resource:/path/pattern:action'"
@@ -249,7 +275,7 @@ class SecurityManager:
             return (
                 permission_resource in (resource, "*")
                 and permission_action in (action, "*")
-                and fnmatchcase(path.lower(), permission_path)
+                and fnmatchcase(path, permission_path)
             )
         return False
 
@@ -271,6 +297,7 @@ class SecurityManager:
             raise ValueError("Authorization resource type must be a non-empty string")
         action = action.strip().lower()
         resource = resource.strip().lower()
+        path = self._canonicalize_path(path)
 
         account = self._users.get(username)
         if account is None:
