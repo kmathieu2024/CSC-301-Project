@@ -116,6 +116,7 @@ processForm.addEventListener("submit", function (event) {
 // Rebuild the table using the current processes.
 function renderProcessTable() {
     renderDeviceInputs();
+    renderNetworkInputs();
     renderReferenceEditor();
     renderFileRequestEditor();
     processTableBody.replaceChildren();
@@ -191,6 +192,10 @@ function loadWorkload(data) {
         throw new Error("Place device_requests inside an existing process.");
     const importedDevices = validateDevices(data.devices);
     const importedMemory = validateMemory(data.memory);
+    if (Object.hasOwn(data, "network_requests") || Object.hasOwn(data, "network_events"))
+        throw new Error("Place network_requests inside processes and events inside network.events.");
+    if (Object.hasOwn(data, "network")) networkFiniteJson(data);
+    const importedNetwork = validateNetwork(data.network);
     const importedConfiguration = data.configuration;
     if (importedConfiguration !== undefined) {
         if (!isObject(importedConfiguration)) throw new Error("Configuration must be an object.");
@@ -275,6 +280,11 @@ function loadWorkload(data) {
                     process.device_requests, process.burst_time, importedDevices
                 )
             }),
+            ...(process.network_requests === undefined ? {} : {
+                network_requests: validateNetworkRequests(
+                    process.network_requests, process.burst_time, importedNetwork
+                )
+            }),
             file_requests: validateFileRequests(
                 process.file_requests === undefined ? {} : process.file_requests,
                 process.burst_time
@@ -284,6 +294,8 @@ function loadWorkload(data) {
 
     if (!importedMemory.enabled && uploadedProcesses.some(p => Object.keys(p.memory_references).length))
         throw new Error("Enable memory simulation or remove memory references before importing.");
+    validateNetworkCandidate(importedNetwork, uploadedProcesses);
+    guardNetworkSecurityImport(data);
     // File reading is asynchronous: do not replace inputs if Run began meanwhile.
     if (busy) throw new Error("Wait for the simulation to pause before importing.");
     // Update the dashboard only after every process passes validation.
@@ -292,6 +304,7 @@ function loadWorkload(data) {
     configuredDevices.splice(0, configuredDevices.length, ...importedDevices);
     clearDeviceDrafts();
     applyMemoryConfiguration(importedMemory);
+    applyNetworkConfiguration(importedNetwork);
     if (importedConfiguration) {
         for (const [key, id] of [["context_switch_cost", "context-switch-cost"], ["time_quantum", "time-quantum"], ["aging_interval", "aging-interval"]]) {
             if (importedConfiguration[key] !== undefined) document.getElementById(id).value = importedConfiguration[key];
@@ -376,6 +389,11 @@ function collectSimulationInput() {
                     process.device_requests, process.burst_time
                 )
             }),
+            ...(process.network_requests === undefined ? {} : {
+                network_requests: validateNetworkRequests(
+                    process.network_requests, process.burst_time
+                )
+            }),
             file_requests: validateFileRequests(
                 process.file_requests === undefined ? {} : process.file_requests,
                 process.burst_time
@@ -389,6 +407,7 @@ function collectSimulationInput() {
         configuration: configuration,
         processes: processCopies,
         ...(configuredDevices.length ? {devices: validateDevices(configuredDevices)} : {}),
+        ...(configuredNetwork ? {network: validateNetworkCandidate(configuredNetwork)} : {}),
         memory: collectMemoryConfiguration(),
         security: collectSecurityConfiguration()
     };
@@ -445,6 +464,7 @@ const initialResultDisplays = Array.from(document.querySelectorAll(
 
 function inputChanged() {
     clearDeviceResults();
+    clearNetworkResults();
     clearManagerTestMode();
     started = false;
     savedInput = "";
@@ -469,6 +489,7 @@ function lockWorkloadEditing() {
         "#memory input, #memory select, #memory button, " +
         "#device form input, #device form select, #device form button, #device-config-body button, #device-input-body button, #load-device-demo, " +
         "#file-request-form input, #file-request-form textarea, #file-request-form select, #file-request-form button, #file-request-table-body button, " +
+        "#network form input, #network form select, #network form button, #network table button, #load-network-demo, " +
         "#security-config"
     )).filter(control => !control.closest("#memory-comparison"))
         .map(control => ({control, disabled: control.disabled}));
@@ -479,6 +500,7 @@ function unlockWorkloadEditing() {
     for (const {control, disabled} of lockedWorkloadControls) control.disabled = disabled;
     lockedWorkloadControls = [];
     document.getElementById("load-device-demo").disabled = busy || deviceDemoLoading;
+    document.getElementById("load-network-demo").disabled = busy || networkDemoLoading;
 }
 
 
@@ -517,6 +539,7 @@ async function sendRequest(action, data = {}) {
 // Show simulation progress.
 function showResults(result) {
     renderDeviceResults(result);
+    renderNetworkResults(result);
     renderMemoryManager(result);
     renderFileManager(result);
     renderSecurityManager(result);
@@ -531,7 +554,7 @@ function showResults(result) {
 
     const total = result.processes.length;
     const deviceWork = Object.values(result.devices || {}).some(d => d.active_operation || d.queue.length);
-    const finished = total > 0 && completed === total && !deviceWork;
+    const finished = total > 0 && completed === total && !deviceWork && !networkPendingWork(result);
     renderManagerTestResult(result, finished);
     document.getElementById("step-button").disabled = finished;
 
@@ -589,6 +612,11 @@ function exportResults() {
 
 // Start the simulation if needed.
 async function startSimulation() {
+    if (!validateNetworkDrafts()) {
+        showPage("network", document.querySelector("button[onclick*=\"'network'\"]"));
+        document.querySelector('#network .field-error:not(:empty)')?.focus();
+        return false;
+    }
     if (!validateDeviceDrafts()) {
         showPage("device", document.querySelector("button[onclick*=\"'device'\"]"));
         document.querySelector('#device .field-error:not(:empty)')?.focus();
