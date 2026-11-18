@@ -598,3 +598,131 @@ def test_scan_free_endpoint_reversal_and_current_head_service() -> None:
     assert seek.request_id == other
     assert manager.devices["disk"].direction == ScanDirection.DOWN
     assert seek.due_at == 81
+
+
+@pytest.mark.parametrize("independent", [False, True])
+@pytest.mark.parametrize("recorded", [False, True])
+@pytest.mark.parametrize("timestamp", [0, 3])
+def test_submission_history_failure_rolls_back(
+    monkeypatch: pytest.MonkeyPatch, independent: bool, recorded: bool,
+    timestamp: float,
+) -> None:
+    """A failed history write cannot publish a request or disturb another device."""
+    configs = [config()]
+    if independent:
+        configs.append(config(device_id="other"))
+    manager = DeviceManager(configs)
+    if independent:
+        manager.submit_request("other", spec(device_id="other"), 0)
+        manager.schedule_io("other", 0)
+    manager.submit_request("existing-active", spec(), 0)
+    manager.schedule_io("disk", 0)
+    manager.submit_request("existing-queued", spec(70), 0)
+    before = manager.snapshot(timestamp)
+    before_internal = deepcopy(manager.__dict__)
+    sequence = manager._request_sequence
+    original = manager._event
+    failure = RuntimeError("request history failed")
+
+    def event(*args, **kwargs):
+        if args[2] == "device_request" and args[0].config.device_id == "disk":
+            if recorded:
+                original(*args, **kwargs)
+            raise failure
+        return original(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(manager, "_event", event)
+        with pytest.raises(RuntimeError) as raised:
+            manager.submit_request("P", spec(), timestamp)
+    assert raised.value is failure
+    assert manager.snapshot(timestamp) == before
+    assert manager.__dict__ == before_internal
+    assert manager._request_sequence == sequence
+    manager.validate()
+    manager.reset()
+    manager.submit_request("P", spec(), 0)
+    first = manager.snapshot(drain(manager))
+    manager.reset()
+    manager.submit_request("P", spec(), 0)
+    second = manager.snapshot(drain(manager))
+    assert first["metrics"] == second["metrics"]
+
+
+@pytest.mark.parametrize("kind", [DeviceType.DISK, DeviceType.KEYBOARD])
+def test_same_timestamp_cancel_replace_and_reset(kind: DeviceType) -> None:
+    """Equal due times cannot make an invalid token match replacement work."""
+    manager = DeviceManager([config(kind=kind, service=0)])
+    request = spec(50 if kind == DeviceType.DISK else None)
+    old_id = manager.submit_request("old", request, 0)
+    old = manager.schedule_io("disk", 0)
+    manager.cancel_request(old_id, 0)
+    replacement_id = manager.submit_request("new", request, 0)
+    replacement = manager.schedule_io("disk", 0)
+    before = manager.snapshot(0)
+    with pytest.raises(ValueError, match="Stale"):
+        finish(manager, "disk", old)
+    assert manager.snapshot(0) == before
+    finish(manager, "disk", replacement)
+    with pytest.raises(ValueError, match="Stale"):
+        finish(manager, "disk", replacement)
+    assert [n["request_id"] for n in manager.snapshot(0)["notifications"]] == [
+        old_id, replacement_id,
+    ]
+    manager.reset()
+    manager.submit_request("reset", request, 0)
+    fresh = manager.schedule_io("disk", 0)
+    before = manager.snapshot(0)
+    for invalid in (old, replacement):
+        with pytest.raises(ValueError, match="Stale"):
+            finish(manager, "disk", invalid)
+        assert manager.snapshot(0) == before
+    finish(manager, "disk", fresh)
+    assert len(manager.snapshot(0)["notifications"]) == 1
+
+
+@pytest.mark.parametrize("direction", list(ScanDirection))
+@pytest.mark.parametrize("arrival_before", [False, True])
+def test_scan_endpoint_collision_and_same_cylinder_order(
+    direction: ScanDirection, arrival_before: bool,
+) -> None:
+    """Endpoint arrivals straddle reversal without interception or skipped work."""
+    configuration = config(SchedulingPolicy.SCAN, service=0)
+    manager = DeviceManager([replace(configuration, disk=replace(
+        configuration.disk, initial_direction=direction,
+    ))])
+    up = direction == ScanDirection.UP
+    endpoint, behind, passed = (99, 20, 60) if up else (0, 79, 40)
+    behind_id = manager.submit_request("behind", spec(behind), 0)
+    movement = manager.schedule_io("disk", 0)
+    passed_id = manager.submit_request("passed", spec(passed), 1)
+    assert manager.schedule_io("disk", 1) is None
+    assert manager.devices["disk"].head_position == 50
+    now = movement.due_at
+    if not arrival_before:
+        finish(manager, "disk", movement)
+    first = manager.submit_request("first", spec(endpoint), now)
+    second = manager.submit_request("second", spec(endpoint), now)
+    if arrival_before:
+        finish(manager, "disk", movement)
+    assert manager.devices["disk"].direction == (
+        ScanDirection.DOWN if up else ScanDirection.UP
+    )
+    for expected in (first, second):
+        operation = manager.schedule_io("disk", now)
+        assert operation.request_id == expected
+        assert operation.kind == OperationKind.SERVICE
+        finish(manager, "disk", operation)
+    end = drain(manager, now)
+    snapshot = manager.snapshot(end)
+    assert [n["request_id"] for n in snapshot["notifications"]] == [
+        first, second, passed_id, behind_id,
+    ]
+    metric = snapshot["metrics"]["devices"]["disk"]
+    assert metric["head_movement"] == abs(50 - endpoint) + abs(endpoint - behind)
+    assert metric["endpoint_time"] == abs(50 - endpoint)
+    assert metric["busy_time"] == end == metric["head_movement"]
+    assert sum(r["seek_time"] for r in snapshot["metrics"]["requests"].values()) == (
+        abs(endpoint - behind)
+    )
+    assert sum(r["service_time"] for r in snapshot["metrics"]["requests"].values()) == 0

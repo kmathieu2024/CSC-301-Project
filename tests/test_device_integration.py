@@ -9,8 +9,9 @@ import pytest
 from src.core.process import Process, ProcessState
 from src.core.simulation import SimulationEngine, SimulationExecutionError
 from src.managers.device import (
-    DeviceConfig, DeviceManager, DeviceRequestSpec, DeviceType, DiskGeometry,
-    ScanDirection, SchedulingPolicy,
+    DeviceConfig, DeviceManager, DeviceRequestSpec, DeviceType,
+    DiskGeometry,
+    OperationKind, RequestState, ScanDirection, SchedulingPolicy,
 )
 from src.managers.memory import MemoryManager
 
@@ -433,3 +434,507 @@ def test_no_progress_is_detected(entry: str, monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(SimulationExecutionError, match="no progress"):
         getattr(engine, entry)()
     assert engine.execution_error["type"] == "RuntimeError"
+
+
+@pytest.mark.parametrize("independent", [False, True])
+@pytest.mark.parametrize("boundary", [
+    "history", "blocked_sync", "block_log", "queue_before", "queue_after",
+    "scheduled_sync",
+])
+def test_submission_transition_failure_cleanup(
+    monkeypatch: pytest.MonkeyPatch, independent: bool, boundary: str,
+) -> None:
+    """All submission boundaries clean up only the affected process and device."""
+    device = manager(service=10, count=2 if independent else 1)
+    target = "d1" if independent else "d0"
+    process = Process("P", 0, 1, device_requests={0: spec(target)})
+    processes = ([Process("A", 0, 1, device_requests={0: spec()})]
+                 if independent else []) + [process]
+    engine = SimulationEngine(processes, device_manager=device)
+    for _ in range(10):
+        engine.step()
+        if process.state == ProcessState.RUNNING:
+            break
+    assert process.state == ProcessState.RUNNING
+    before = device.snapshot(engine.current_time)
+    other_events = [e for e in engine.event_queue
+                    if e[3] == "device_complete" and e[4][0] != target]
+    other_waits = {key: value for key, value in engine._device_waiting.items()}
+    failure = RuntimeError("submission boundary failed")
+    original_event, original_sync = device._event, engine._sync_device_state
+    original_log, original_schedule = engine.log, engine.schedule_event
+    calls = 0
+
+    def event(*args, **kwargs):
+        if args[2] == "device_request" and args[0].config.device_id == target:
+            raise failure
+        return original_event(*args, **kwargs)
+
+    def sync():
+        nonlocal calls
+        original_sync()
+        if process.state == ProcessState.WAITING:
+            calls += 1
+            if calls == (2 if boundary == "scheduled_sync" else 1):
+                raise failure
+
+    def log(*args, **kwargs):
+        original_log(*args, **kwargs)
+        if args[0] is process and args[1] == "block":
+            raise failure
+
+    def schedule(timestamp, event_type, payload):
+        if event_type == "device_complete" and payload[0] == target:
+            if boundary == "queue_after":
+                original_schedule(timestamp, event_type, payload)
+            raise failure
+        return original_schedule(timestamp, event_type, payload)
+
+    with monkeypatch.context() as patch:
+        if boundary == "history":
+            patch.setattr(device, "_event", event)
+        elif boundary == "block_log":
+            patch.setattr(engine, "log", log)
+        elif boundary.startswith("queue_"):
+            patch.setattr(engine, "schedule_event", schedule)
+        else:
+            patch.setattr(engine, "_sync_device_state", sync)
+        with pytest.raises(SimulationExecutionError) as raised:
+            engine.step()
+    assert raised.value.__cause__ is failure
+    assert process.state == ProcessState.RUNNING
+    assert process.blocked_time == 0
+    assert engine._device_waiting == other_waits
+    assert all(key[0] != "P" for key in engine._device_submitted)
+    runtime = device.devices[target]
+    assert runtime.queue == [] and runtime.active_operation is None
+    requests = [r for r in device.requests.values() if r.pid == "P"]
+    assert all(r.state.value == "CANCELLED" for r in requests)
+    notifications = [n for n in device.snapshot(0)["notifications"]
+                     if n["pid"] == "P"]
+    assert len(notifications) == len(requests)
+    if independent:
+        assert device.snapshot(0)["devices"]["d0"] == before["devices"]["d0"]
+        assert all(event in engine.event_queue for event in other_events)
+    for event in list(engine.event_queue):
+        if event[3] == "device_complete" and event[4][0] == target:
+            snapshot = device.snapshot(0)
+            engine._complete_device_operation(*event[4])
+            assert device.snapshot(0) == snapshot
+    device.validate()
+    with pytest.raises(SimulationExecutionError, match="Reset required"):
+        engine.run()
+    engine.reset()
+    first = engine.run()
+    engine.reset()
+    assert engine.run() == first
+
+
+@pytest.mark.parametrize("secondary", ["cancel_after", "cancel_event", "diagnostic"])
+def test_cleanup_errors_do_not_replace_submission_cause(
+    monkeypatch: pytest.MonkeyPatch, secondary: str,
+) -> None:
+    """Secondary cleanup diagnostics cannot hide the original execution failure."""
+    process = Process("P", 0, 1, device_requests={0: spec()})
+    device = manager()
+    engine = SimulationEngine([process], device_manager=device)
+    engine.step()
+    original = RuntimeError("original submission error")
+    cleanup = ValueError("secondary cleanup error")
+    original_log, original_cancel = engine.log, device.cancel_request
+    original_sync, original_event = engine._sync_device_state, device._event
+
+    def log(*args, **kwargs):
+        if args[1] == "block" and secondary != "cancel_event":
+            raise original
+        if secondary == "diagnostic" and args[1] == "device_submission_failed":
+            raise cleanup
+        return original_log(*args, **kwargs)
+
+    def cancel(*args, **kwargs):
+        original_cancel(*args, **kwargs)
+        raise cleanup
+
+    def sync():
+        original_sync()
+        if device.devices["d0"].active_operation is not None:
+            raise original
+
+    def event(*args, **kwargs):
+        if args[2] == "operation_abort":
+            raise cleanup
+        return original_event(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, "log", log)
+        if secondary == "cancel_after":
+            patch.setattr(device, "cancel_request", cancel)
+        elif secondary == "cancel_event":
+            patch.setattr(engine, "_sync_device_state", sync)
+            patch.setattr(device, "_event", event)
+        with pytest.raises(SimulationExecutionError) as raised:
+            engine.step()
+    assert raised.value.__cause__ is original
+    assert any("secondary cleanup error" in note for note in original.__notes__)
+    assert process.state == ProcessState.RUNNING
+    assert engine._device_waiting == engine._device_submitted == {}
+    assert device.devices["d0"].queue == []
+    assert device.devices["d0"].active_operation is None
+    assert next(iter(device.requests.values())).state == RequestState.CANCELLED
+    assert len(device.snapshot(0)["notifications"]) == 1
+    device.validate()
+    for event in engine.event_queue:
+        if event[3] == "device_complete":
+            snapshot = device.snapshot(0)
+            engine._complete_device_operation(*event[4])
+            assert device.snapshot(0) == snapshot
+    engine.reset()
+    first = engine.run()
+    engine.reset()
+    assert engine.run() == first
+
+
+@pytest.mark.parametrize("action", ["failure", "cancel_active", "cancel_queued"])
+def test_batch_terminal_wakeups_recovery_and_device_isolation(action: str) -> None:
+    """Active/queued outcomes wake once while an independent device keeps running."""
+    device = manager(service=10, count=2)
+    processes = [Process(pid, 0, 1, device_requests={0: spec(dev)})
+                 for pid, dev in [("A", "d0"), ("B", "d0"), ("C", "d1")]]
+    engine = SimulationEngine(processes, device_manager=device)
+    for _ in range(10):
+        engine.step()
+        if all(p.state == ProcessState.WAITING for p in processes):
+            break
+    assert all(p.state == ProcessState.WAITING for p in processes)
+    calls = []
+    on_ready = engine.scheduler.on_ready
+
+    def ready(process, timestamp):
+        calls.append((process.pid, timestamp))
+        return on_ready(process, timestamp)
+
+    engine.scheduler.on_ready = ready
+    engine.advance_time(2)
+    independent = device.snapshot(2)["devices"]["d1"]
+    requests = {r.pid: r.request_id for r in device.requests.values()}
+    if action == "failure":
+        assert len(device.fail_device("d0", 2, "broken")) == 2
+    else:
+        pid = "A" if action == "cancel_active" else "B"
+        device.cancel_request(requests[pid], 2)
+        assert device.cancel_request(requests[pid], 2) == ()
+    assert device.snapshot(2)["devices"]["d1"] == independent
+    engine.check_arrivals()
+    engine.check_arrivals()
+    if action == "failure":
+        assert device.schedule_io("d0", 2) is None
+        device.recover_device("d0", 2)
+        assert device.schedule_io("d0", 2) is None
+    result = engine.run()
+    assert sorted(pid for pid, _ in calls) == ["A", "B", "C"]
+    assert len(result["device_outcomes"]) == 3
+    expected = {"failure": [2, 2, 10], "cancel_active": [2, 12, 10],
+                "cancel_queued": [10, 2, 10]}[action]
+    assert [p.blocked_time for p in processes] == expected
+    outcomes = [device.requests[requests[p]].state for p in ("A", "B")]
+    assert outcomes == {
+        "failure": [RequestState.FAILED, RequestState.FAILED],
+        "cancel_active": [RequestState.CANCELLED, RequestState.COMPLETED],
+        "cancel_queued": [RequestState.COMPLETED, RequestState.CANCELLED],
+    }[action]
+    assert len(device.snapshot(engine.current_time)["notifications"]) == 3
+    device.validate()
+    engine.reset()
+    first = engine.run()
+    engine.reset()
+    assert engine.run() == first
+
+
+def test_duplicate_notification_history_wakes_once() -> None:
+    """Duplicate notification records cannot duplicate on_ready or blocked time."""
+    process = Process("P", 0, 1, device_requests={0: spec()})
+    device = manager(service=10)
+    engine = SimulationEngine([process], device_manager=device)
+    engine.step()
+    engine.step()
+    engine.advance_time(2)
+    request_id = next(iter(device.requests))
+    device.cancel_request(request_id, 2)
+    device._notifications.append(device._notifications[-1])
+    calls = []
+    on_ready = engine.scheduler.on_ready
+
+    def ready(process, timestamp):
+        calls.append((process.pid, timestamp))
+        return on_ready(process, timestamp)
+
+    engine.scheduler.on_ready = ready
+    engine.check_arrivals()
+    engine.check_arrivals()
+    assert calls == [("P", 2)]
+    assert process.blocked_time == 2
+    result = engine.run()
+    assert len([e for e in result["events"] if e["action"] == "device_interrupt"]) == 1
+    assert calls == [("P", 2)]
+
+
+@pytest.mark.parametrize("invalid", ["pid", "device", "terminated"])
+def test_invalid_notification_cannot_wake_process(invalid: str) -> None:
+    """Owner validation precedes state, scheduler, association, and time mutation."""
+    process = Process("P", 0, 1, device_requests={0: spec()})
+    device = manager(service=10)
+    engine = SimulationEngine([process], device_manager=device)
+    engine.step()
+    engine.step()
+    engine.advance_time(2)
+    device.cancel_request(next(iter(device.requests)), 2)
+    notification = device._notifications[-1]
+    if invalid == "terminated":
+        process.state = ProcessState.TERMINATED
+    else:
+        device._notifications[-1] = replace(
+            notification, **({"pid": "wrong"} if invalid == "pid" else
+                             {"device_id": "wrong"}),
+        )
+    before = (process.state, process.blocked_time,
+              dict(engine._device_waiting), engine._device_notification_cursor)
+    calls = []
+    on_ready = engine.scheduler.on_ready
+
+    def ready(process, timestamp):
+        calls.append((process.pid, timestamp))
+        return on_ready(process, timestamp)
+
+    engine.scheduler.on_ready = ready
+    with pytest.raises(ValueError, match="does not match"):
+        engine.check_arrivals()
+    assert calls == []
+    assert (process.state, process.blocked_time, engine._device_waiting,
+            engine._device_notification_cursor) == before
+
+
+@pytest.mark.parametrize("submitting_device", ["d0", "d1"])
+@pytest.mark.parametrize("recorded", [False, True])
+@pytest.mark.parametrize("cleanup", ["none", "abort_history", "cancel_after"])
+def test_older_queued_request_callback_failure_is_finalized(
+    monkeypatch: pytest.MonkeyPatch, submitting_device: str,
+    recorded: bool, cleanup: str,
+) -> None:
+    """Synchronization must clean up B's failed registration, not just P's input."""
+    device = manager(service=10, count=3)
+    processes = [Process(pid, 0, 1, device_requests={0: spec(dev)})
+                 for pid, dev in [("A", "d0"), ("B", "d0"), ("C", "d2"),
+                                  ("P", submitting_device)]]
+    engine = SimulationEngine(processes, device_manager=device)
+    for _ in range(12):
+        engine.step()
+        if processes[-1].state == ProcessState.RUNNING:
+            break
+    assert [p.state for p in processes] == [ProcessState.WAITING] * 3 + [
+        ProcessState.RUNNING,
+    ]
+    ids = {request.pid: request.request_id for request in device.requests.values()}
+    independent = device.devices["d2"]
+    independent_callbacks = [e for e in engine.event_queue
+                             if e[3] == "device_complete" and e[4][0] == "d2"]
+    device.cancel_request(ids["A"], 0)
+    assert device.requests[ids["B"]].state == RequestState.QUEUED
+    failure = RuntimeError("B callback registration failed")
+    original_schedule, on_ready = engine.schedule_event, engine.scheduler.on_ready
+    original_cancel, original_event = device.cancel_request, device._event
+    attempted, wakeups = [], []
+    failed_operations = []
+
+    def schedule(timestamp, event_type, payload):
+        if event_type == "device_complete":
+            attempted.append(payload[1].request_id)
+            if payload[1].request_id == ids["B"]:
+                failed_operations.append(payload)
+                if recorded:
+                    original_schedule(timestamp, event_type, payload)
+                raise failure
+        return original_schedule(timestamp, event_type, payload)
+
+    def ready(process, timestamp):
+        wakeups.append((process.pid, timestamp))
+        return on_ready(process, timestamp)
+
+    def cancel(*args, **kwargs):
+        result = original_cancel(*args, **kwargs)
+        if args[0] == ids["B"]:
+            raise ValueError("secondary B cleanup failure")
+        return result
+
+    def event(*args, **kwargs):
+        request = kwargs.get("request")
+        if (args[2] == "operation_abort" and request is not None
+                and request.request_id == ids["B"]):
+            raise ValueError("secondary B cleanup failure")
+        return original_event(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, "schedule_event", schedule)
+        patch.setattr(engine.scheduler, "on_ready", ready)
+        if cleanup == "cancel_after":
+            patch.setattr(device, "cancel_request", cancel)
+        elif cleanup == "abort_history":
+            patch.setattr(device, "_event", event)
+        with pytest.raises(SimulationExecutionError) as raised:
+            engine.step()
+        engine._sync_device_state()
+        engine._sync_device_state()
+    assert raised.value.__cause__ is failure
+    assert attempted == [ids["B"]]
+    if cleanup != "none":
+        assert any("secondary B cleanup failure" in n for n in failure.__notes__)
+    assert device.requests[ids["B"]].state == RequestState.CANCELLED
+    assert processes[1].state == ProcessState.READY
+    assert processes[1].blocked_time == 0
+    assert ids["B"] not in engine._device_waiting
+    assert sorted(wakeups) == [("A", 0), ("B", 0)]
+    assert processes[-1].state == ProcessState.RUNNING
+    assert device.devices["d0"].active_operation is None
+    assert device.devices["d2"] == independent
+    assert all(event in engine.event_queue for event in independent_callbacks)
+    assert sum(n["request_id"] == ids["B"]
+               for n in device.snapshot(0)["notifications"]) == 1
+    before = device.snapshot(0)
+    for payload in failed_operations:
+        engine._complete_device_operation(*payload)
+    assert device.snapshot(0) == before
+    device.validate()
+    with pytest.raises(SimulationExecutionError, match="Reset required"):
+        engine.run()
+    engine.reset()
+    first = engine.run()
+    engine.reset()
+    assert engine.run() == first
+
+
+def test_synchronization_failure_preserves_earlier_scheduled_operation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later device failure cannot roll back another device's valid callback."""
+    device = manager(service=10, count=4)
+    processes = [Process(pid, 0, 1, device_requests={0: spec(dev)})
+                 for pid, dev in [("A", "d0"), ("B", "d1"), ("C", "d2"),
+                                  ("D", "d0"), ("E", "d1"), ("P", "d3")]]
+    engine = SimulationEngine(processes, device_manager=device)
+    for _ in range(20):
+        engine.step()
+        if processes[-1].state == ProcessState.RUNNING:
+            break
+    assert processes[-1].state == ProcessState.RUNNING
+    ids = {r.pid: r.request_id for r in device.requests.values()}
+    device.cancel_request(ids["A"], 0)
+    device.cancel_request(ids["B"], 0)
+    independent = device.devices["d2"]
+    failure = RuntimeError("E registration failed after D was scheduled")
+    original = engine.schedule_event
+    scheduled = []
+
+    def schedule(timestamp, kind, payload):
+        if kind == "device_complete":
+            scheduled.append(payload[1].request_id)
+            if payload[1].request_id == ids["E"]:
+                raise failure
+        return original(timestamp, kind, payload)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, "schedule_event", schedule)
+        with pytest.raises(SimulationExecutionError) as raised:
+            engine.step()
+    assert raised.value.__cause__ is failure
+    assert scheduled == [ids["D"], ids["E"]]
+    operation = device.devices["d0"].active_operation
+    assert operation.request_id == ids["D"]
+    assert any(e[3] == "device_complete" and e[4][1] == operation
+               for e in engine.event_queue)
+    assert processes[3].state == ProcessState.WAITING
+    assert processes[4].state == ProcessState.READY
+    assert device.requests[ids["E"]].state == RequestState.CANCELLED
+    assert device.devices["d1"].active_operation is None
+    assert device.devices["d2"] == independent
+    device.validate()
+    engine.reset()
+    first = engine.run()
+    engine.reset()
+    assert engine.run() == first
+
+
+@pytest.mark.parametrize("boundary", [
+    "activation", "activation_operation", "seek_service", "seek_activation",
+    "endpoint",
+])
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_scheduling_boundary_cleanup_and_continuations(
+    monkeypatch: pytest.MonkeyPatch, boundary: str, cleanup_failure: bool,
+) -> None:
+    """Partial activation, seek continuations, and requestless movement fail closed."""
+    disk = boundary in ("seek_service", "seek_activation", "endpoint")
+    policy = SchedulingPolicy.SCAN if boundary == "endpoint" else SchedulingPolicy.FCFS
+    device = manager(service=2, disk=disk, policy=policy)
+    cylinder = 20 if boundary == "endpoint" else 60 if disk else None
+    process = Process("P", 0, 1, device_requests={0: spec(cylinder=cylinder)})
+    engine = SimulationEngine([process], device_manager=device)
+    engine.step()
+    if boundary in ("seek_service", "seek_activation"):
+        engine.step()
+        assert process.state == ProcessState.WAITING
+    failure = RuntimeError("selected operation could not be registered")
+    original_event, original_schedule = device._event, engine.schedule_event
+    wakeups = []
+    on_ready = engine.scheduler.on_ready
+
+    def ready(process, timestamp):
+        wakeups.append((process.pid, timestamp))
+        return on_ready(process, timestamp)
+
+    def event(*args, **kwargs):
+        if ((boundary == "activation" and args[2] == "device_start")
+                or (boundary in ("activation_operation", "seek_activation")
+                    and args[2] == "service")):
+            raise failure
+        cleanup_kind = "operation_abort" if boundary != "activation" else "device_cancelled"
+        if cleanup_failure and args[2] == cleanup_kind:
+            raise ValueError("secondary scheduling cleanup history error")
+        return original_event(*args, **kwargs)
+
+    def schedule(timestamp, kind, payload):
+        if kind == "device_complete" and payload[1].kind == (
+            OperationKind.SERVICE if boundary == "seek_service" else
+            OperationKind.SCAN_ENDPOINT
+        ):
+            raise failure
+        return original_schedule(timestamp, kind, payload)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(device, "_event", event)
+        patch.setattr(engine, "schedule_event", schedule)
+        patch.setattr(engine.scheduler, "on_ready", ready)
+        with pytest.raises(SimulationExecutionError) as raised:
+            engine.run()
+    assert raised.value.__cause__ is failure
+    if cleanup_failure:
+        assert any("secondary scheduling cleanup" in n for n in failure.__notes__)
+    request = next(iter(device.requests.values()))
+    assert request.state == (RequestState.FAILED if boundary == "endpoint"
+                             else RequestState.CANCELLED)
+    assert device.devices["d0"].active_operation is None
+    assert device.devices["d0"].queue == []
+    assert engine._device_waiting == {}
+    assert len(device.snapshot(engine.current_time)["notifications"]) == 1
+    if boundary in ("seek_service", "seek_activation"):
+        assert process.state == ProcessState.READY
+        assert process.blocked_time == 10
+        assert wakeups == [("P", 10)]
+        assert device.devices["d0"].head_position == 60
+    else:
+        assert process.state == ProcessState.RUNNING
+        assert process.blocked_time == 0
+        assert wakeups == []
+    device.validate()
+    engine.reset()
+    first = engine.run()
+    engine.reset()
+    assert engine.run() == first

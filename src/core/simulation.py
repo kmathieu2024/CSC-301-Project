@@ -130,6 +130,7 @@ class SimulationEngine:
         self._device_submitted: dict[tuple[str, float], str] = {}
         self._device_waiting: dict[str, tuple[Process, float]] = {}
         self._device_outcomes: dict[str, dict[str, Any]] = {}
+        self._device_submission_id: str | None = None
         self._device_event_cursor = self._device_notification_cursor = 0
         if self.device_manager is not None:
             self.device_manager.reset(timestamp=0)
@@ -229,14 +230,69 @@ class SimulationEngine:
     ) -> None:
         """Keep callback identity private; the event ID prevents payload comparison."""
         if operation is not None:
-            self.schedule_event(
-                operation.due_at, "device_complete", (device_id, operation),
-            )
+            try:
+                self.schedule_event(
+                    operation.due_at, "device_complete", (device_id, operation),
+                )
+            except Exception as error:
+                active = self.device_manager.devices[device_id].active_operation
+                if active == operation:
+                    self._invalidate_unscheduled_device_work(
+                        device_id, operation.request_id, error,
+                    )
+                raise
 
     def _schedule_device(self, device_id: str) -> None:
         """Ask the device manager for work without charging CPU time."""
-        operation = self.device_manager.schedule_io(device_id, self.current_time)
+        previous = self.device_manager.devices[device_id]
+        try:
+            operation = self.device_manager.schedule_io(device_id, self.current_time)
+        except Exception as error:
+            current = self.device_manager.devices[device_id]
+            if (previous.active_operation is None
+                    and previous.active_request_id is None
+                    and (current.active_operation is not None
+                         or current.active_request_id is not None)):
+                self._invalidate_unscheduled_device_work(
+                    device_id, current.active_request_id, error,
+                )
+            raise
         self._queue_device_operation(device_id, operation)
+
+    def _invalidate_unscheduled_device_work(
+        self, device_id: str, request_id: str | None, error: Exception,
+    ) -> None:
+        """Finalize the selected work, then deliver outcomes without scheduling.
+
+        Request operations are canceled. Endpoint travel has no owning request;
+        failing that device aborts the movement and fails its waiting queue.
+        The outer execution boundary still seals the run until reset.
+        """
+        try:
+            reason = "Device operation scheduling failed: " + str(error)
+            if request_id is None:
+                self.device_manager.fail_device(device_id, self.current_time, reason)
+            else:
+                self.device_manager.cancel_request(
+                    request_id, self.current_time, reason,
+                )
+        except Exception as cleanup_error:
+            error.add_note("Operation cleanup failed: " + str(cleanup_error))
+        try:
+            snapshot = self.device_manager.snapshot(self.current_time)
+        except Exception as cleanup_error:
+            error.add_note("Operation cleanup snapshot failed: " + str(cleanup_error))
+            return
+        try:
+            self._import_device_events(snapshot)
+        except Exception as cleanup_error:
+            error.add_note("Operation cleanup history failed: " + str(cleanup_error))
+        try:
+            self._deliver_device_notifications(
+                snapshot, defer_request_id=self._device_submission_id,
+            )
+        except Exception as cleanup_error:
+            error.add_note("Operation cleanup delivery failed: " + str(cleanup_error))
 
     def _import_device_events(self, snapshot: dict[str, Any]) -> None:
         """Append each manager event exactly once under the engine scenario ID."""
@@ -255,15 +311,29 @@ class SimulationEngine:
             return
         snapshot = self.device_manager.snapshot(self.current_time)
         self._import_device_events(snapshot)
+        affected = self._deliver_device_notifications(snapshot)
+        for device_id in sorted(affected):
+            self._schedule_device(device_id)
+        if affected:
+            self._import_device_events(self.device_manager.snapshot(self.current_time))
+
+    def _deliver_device_notifications(
+        self, snapshot: dict[str, Any], *, defer_request_id: str | None = None,
+    ) -> set[str]:
+        """Deliver once; a failed in-progress submission has its own rollback."""
         affected = set()
         notifications = snapshot["notifications"]
         for notification in notifications[self._device_notification_cursor:]:
             request_id = notification["request_id"]
             waiting = self._device_waiting.get(request_id)
-            if waiting is None:
+            if waiting is None or request_id == defer_request_id:
                 continue
             process, started = waiting
-            if (process.pid != notification["pid"]
+            request = snapshot["requests"].get(request_id)
+            if (request is None
+                    or notification["device_id"] != request["spec"]["device_id"]
+                    or notification["pid"] != request["pid"]
+                    or process.pid != notification["pid"]
                     or process.state != ProcessState.WAITING
                     or notification["timestamp"] != self.current_time):
                 raise ValueError("Device notification does not match waiting process")
@@ -285,10 +355,7 @@ class SimulationEngine:
             })
             affected.add(notification["device_id"])
         self._device_notification_cursor = len(notifications)
-        for device_id in sorted(affected):
-            self._schedule_device(device_id)
-        if affected:
-            self._import_device_events(self.device_manager.snapshot(self.current_time))
+        return affected
 
     def _complete_device_operation(
         self, device_id: str, operation: DeviceOperation,
@@ -297,9 +364,16 @@ class SimulationEngine:
         active = self.device_manager.devices[device_id].active_operation
         if active != operation:
             return
-        result = self.device_manager.complete_operation(
-            device_id, operation.token, operation.generation, self.current_time,
-        )
+        try:
+            result = self.device_manager.complete_operation(
+                device_id, operation.token, operation.generation, self.current_time,
+            )
+        except Exception as error:
+            # Seek completion may activate service before its history write fails.
+            self._invalidate_unscheduled_device_work(
+                device_id, operation.request_id, error,
+            )
+            raise
         self._queue_device_operation(device_id, result.next_operation)
         self._sync_device_state()
         self._schedule_device(device_id)
@@ -310,37 +384,54 @@ class SimulationEngine:
     ) -> None:
         """Submit once, block until a matching terminal interrupt, and release CPU."""
         spec = process.device_requests[key[1]]
-        request_id = self.device_manager.submit_request(
-            process.pid, spec, self.current_time,
-        )
-        self._device_submitted[key] = request_id
-        self._device_waiting[request_id] = (process, self.current_time)
         old_state = process.state
-        process.state = ProcessState.WAITING
-        self._sync_device_state()
-        self.log(process, "block", "wait_for_device", old_state)
-        self.events[-1].update({"request_id": request_id, "device_id": spec.device_id})
+        blocked_time = process.blocked_time
+        request_id = None
+        previous_submission = self._device_submission_id
         try:
+            request_id = self.device_manager.submit_request(
+                process.pid, spec, self.current_time,
+            )
+            self._device_submission_id = request_id
+            self._device_submitted[key] = request_id
+            self._device_waiting[request_id] = (process, self.current_time)
+            process.state = ProcessState.WAITING
+            self._sync_device_state()
+            self.log(process, "block", "wait_for_device", old_state)
+            self.events[-1].update({
+                "request_id": request_id, "device_id": spec.device_id,
+            })
             self._schedule_device(spec.device_id)
+            self._sync_device_state()
         except Exception as error:
-            # Do not leave a process waiting on work that was never scheduled.
-            del self._device_waiting[request_id]
-            del self._device_submitted[key]
+            # Registration rolls back locally if it fails before returning an ID.
+            # Otherwise invalidate only this request; queued callbacks become stale.
+            failed_state = process.state
+            if request_id is not None:
+                self._device_waiting.pop(request_id, None)
+                self._device_submitted.pop(key, None)
             process.state = old_state
+            process.blocked_time = blocked_time
             try:
-                self.device_manager.cancel_request(
-                    request_id, self.current_time, "Device scheduling failed: " + str(error),
-                )
+                if request_id is not None:
+                    self.device_manager.cancel_request(
+                        request_id, self.current_time,
+                        "Device submission failed: " + str(error),
+                    )
+            except Exception as cleanup_error:
+                error.add_note("Request cleanup failed: " + str(cleanup_error))
+            try:
                 self._import_device_events(
                     self.device_manager.snapshot(self.current_time),
                 )
+                self.log(process, "device_submission_failed", "abort_device_wait",
+                         failed_state)
+                self.events[-1].update({"outcome": "error", "message": str(error)})
             except Exception as cleanup_error:
-                error.add_note("Request cleanup failed: " + str(cleanup_error))
-            self.log(process, "device_submission_failed", "abort_device_wait",
-                     ProcessState.WAITING)
-            self.events[-1].update({"outcome": "error", "message": str(error)})
+                error.add_note("Submission diagnostic failed: " + str(cleanup_error))
             raise
-        self._sync_device_state()
+        finally:
+            self._device_submission_id = previous_submission
 
     def _block_process(self, process, duration):
         process.blocked_time += duration

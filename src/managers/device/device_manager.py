@@ -294,17 +294,37 @@ class DeviceManager:
             pid=pid, spec=spec, submitted_at=timestamp,
             resolved_service_time=service_time,
         )
-        self._touch(timestamp)
-        self._request_sequence = sequence + 1
-        self._requests[request_id] = request
-        self._costs[request_id] = {
-            "seek_time": 0, "service_time": 0, "service_start_time": None,
-            "reason": None,
-        }
-        runtime.queue.append(request_id)
-        stats = self._stats[spec.device_id]
-        stats["max_queue_length"] = max(stats["max_queue_length"], len(runtime.queue))
-        self._event(runtime, timestamp, "device_request", "", "QUEUED", request=request)
+        previous_sequence = self._request_sequence
+        previous_accounting = self._stats, self._costs, self._last_time
+        event_count = len(self._events)
+        try:
+            self._touch(timestamp)
+            self._request_sequence = sequence + 1
+            self._requests[request_id] = request
+            self._costs[request_id] = {
+                "seek_time": 0, "service_time": 0, "service_start_time": None,
+                "reason": None,
+            }
+            runtime.queue.append(request_id)
+            stats = self._stats[spec.device_id]
+            stats["max_queue_length"] = max(
+                stats["max_queue_length"], len(runtime.queue),
+            )
+            self._event(runtime, timestamp, "device_request", "", "QUEUED",
+                        request=request)
+        except Exception as error:
+            # _touch projects into new dictionaries. Restore the old accounting
+            # references and remove only this synchronous registration's entries.
+            try:
+                self._requests.pop(request_id, None)
+                if request_id in runtime.queue:
+                    runtime.queue.remove(request_id)
+                self._request_sequence = previous_sequence
+                self._stats, self._costs, self._last_time = previous_accounting
+                del self._events[event_count:]
+            except Exception as cleanup_error:
+                error.add_note("Submission rollback failed: " + str(cleanup_error))
+            raise
         return request_id
 
     def _operation(
@@ -462,12 +482,31 @@ class DeviceManager:
             return ()
         self._touch(timestamp)
         runtime = self._devices[request.spec.device_id]
+        abort_error = None
         if request.state == RequestState.QUEUED:
             runtime.queue.remove(request_id)
         else:
-            self._end_operation(runtime, timestamp, completed=False)
-            runtime.active_request_id = None
-        return (self._terminal(request, RequestState.CANCELLED, timestamp, reason),)
+            try:
+                if runtime.active_operation is not None:
+                    self._end_operation(runtime, timestamp, completed=False)
+            except Exception as error:
+                abort_error = error
+            finally:
+                # Invalidate the callback even if abort-history recording fails.
+                runtime.active_operation = None
+                runtime.active_request_id = None
+                runtime.state = DeviceState.IDLE
+        try:
+            notification = self._terminal(
+                request, RequestState.CANCELLED, timestamp, reason,
+            )
+        except Exception as error:
+            if abort_error is None:
+                raise
+            abort_error.add_note("Cancellation history failed: " + str(error))
+        if abort_error is not None:
+            raise abort_error
+        return (notification,)
 
     def fail_device(
         self, device_id: str, timestamp: float, reason: str,
@@ -482,18 +521,37 @@ class DeviceManager:
         previous = runtime.state.value
         affected = ([runtime.active_request_id] if runtime.active_request_id else [])
         affected += runtime.queue
-        if runtime.active_operation is not None:
-            self._end_operation(runtime, timestamp, completed=False)
-        runtime.active_request_id = None
-        runtime.queue = []
-        notifications = tuple(self._terminal(
-            self._requests[key], RequestState.FAILED, timestamp, reason,
-        ) for key in affected)
-        runtime.state = DeviceState.FAILED
-        runtime.failure_reason = reason
-        self._event(runtime, timestamp, "device_failure", previous, "FAILED",
-                    outcome="error", message=reason)
-        return notifications
+        errors = []
+        try:
+            if runtime.active_operation is not None:
+                self._end_operation(runtime, timestamp, completed=False)
+        except Exception as error:
+            errors.append(error)
+        finally:
+            runtime.active_operation = None
+            runtime.active_request_id = None
+            runtime.queue = []
+            runtime.state = DeviceState.FAILED
+            runtime.failure_reason = reason
+        notifications = []
+        for key in affected:
+            try:
+                notifications.append(self._terminal(
+                    self._requests[key], RequestState.FAILED, timestamp, reason,
+                ))
+            except Exception as error:
+                # History failures must not leave later queue entries live.
+                errors.append(error)
+        try:
+            self._event(runtime, timestamp, "device_failure", previous, "FAILED",
+                        outcome="error", message=reason)
+        except Exception as error:
+            errors.append(error)
+        if errors:
+            for error in errors[1:]:
+                errors[0].add_note("Device failure history failed: " + str(error))
+            raise errors[0]
+        return tuple(notifications)
 
     def _availability(
         self, device_id: str, timestamp: float, expected: DeviceState,
