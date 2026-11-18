@@ -596,3 +596,32 @@ input[aria-invalid="true"] {
 #security .table-container { margin-top: 16px; }
 #security-events-body td:last-child,
 #security-audit-body td:last-child { white-space: pre-wrap; }
+
+/* Network Manager uses existing cards, tables and metrics; no frontend library. */
+#network .card + .card { margin-top: 24px; }
+#network .network-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 14px; }
+#network input:not([type="checkbox"]), #network select { display: block; width: 100%; max-width: 100%; box-sizing: border-box; margin: 5px 0 12px; padding: 8px; }
+#network label { font-weight: 600; }
+#network .field-error { color: #b42318; }
+#network button:focus-visible, #network input:focus-visible, #network select:focus-visible, #network [tabindex]:focus-visible { outline: 3px solid #6c55f7; outline-offset: 3px; }
+#network button:disabled { opacity: .6; cursor: not-allowed; }
+#network .card, #network form { min-width: 0; }
+#network caption { text-align: left; font-weight: bold; padding: 12px 0; }
+#network td { overflow-wrap: anywhere; vertical-align: top; }
+#network .process-table { min-width: 620px; }
+#network .network-small-table { min-width: 320px; }
+#network table button { white-space: nowrap; }
+#network .table-container { max-width: 100%; }
+#network .network-history { max-height: 420px; overflow: auto; }
+#network-graph { width: 100%; min-height: 180px; max-height: 380px; }
+#network-graph[hidden] { display: none; }
+.network-svg-label { font-size: 13px; paint-order: stroke; stroke: white; stroke-width: 4px; fill: #1f2937; }
+.network-timeline-row { margin: 14px 3px; font-size: 14px; }
+.network-track { position: relative; height: 16px; background: #f3f4f6; }
+.network-bar { position: absolute; height: 16px; min-width: 2px; border: 1px solid #4c496d; box-sizing: border-box; }
+.network-marker { transform: translateX(-2px); }
+.network-wait { background: #fde68a; }
+.network-transmission { background: #bfdbfe; }
+.network-propagation { background: #ddd6fe; }
+.network-failure { background: #fecaca; }
+@media (max-width: 600px) { #network .card { padding: 14px; } #network-graph { min-height: 140px; } }

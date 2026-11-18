@@ -6,8 +6,8 @@ developed by a six-member team.
 
 The simulator models several operating system components,
 including process management, memory management, file systems,
-role-based security, device management, and parallel computing. Network
-management remains planned work.
+role-based security, device management, deterministic networking, and parallel
+computing.
 
 The project uses a Python simulation backend, Flask API,
 and an interactive HTML, CSS, and JavaScript dashboard to
@@ -35,7 +35,7 @@ event-based integration between managers.
     - file/: File system operations
     - security/: Role-based access control, authorization, alerts, and audit log
     - device/: Device models, scheduling, execution, and metrics
-    - network/: Network Manager (planned)
+    - network/: Network topology, routing, packet execution, failures, and metrics
   - parallel/: Multicore simulation and synchronization demonstrations
 - dashboard/: HTML, CSS, and JavaScript user interface
 - app.py: Flask application and simulation API
@@ -160,7 +160,8 @@ See docs/git_workflow.md for details.
   authorization, security alerts, and append-only audit logging.
 - Exposed security events and audit records through simulation results and the
   Security Manager dashboard workspace.
-- The Network Manager remains planned.
+- Implemented the Network Manager, deterministic routing and packet scheduling,
+  simulation/Security integration, JSON inputs, and dashboard topology/results.
 - Complete integration of all six managers through the simulation engine.
 - Complete the remaining dashboard workspaces.
 - Expand independent manager and system integration testing.
@@ -892,9 +893,9 @@ The Device Manager workspace includes configuration, request editing,
 device status, histories, timelines, and performance metrics.
 See Device Manager inputs and execution below.
 
-The Security, Network, Parallel Computing,
-Scenario Builder, Testing Center, and Results pages
-still require further implementation.
+The Security and Network workspaces now expose their implemented configuration
+and results. The Parallel Computing, Scenario Builder, Testing Center, and
+Results pages still require further implementation.
 
 ### Port 5000 Troubleshooting
 
@@ -1325,22 +1326,23 @@ Known architectural limitation **DM-A07** remains: healthy-run
 wake processes, and schedule work. It is not a side-effect-free inspection method.
 Standalone callers should deliver failure/cancellation at the engine's current
 timestamp and explicitly call `check_arrivals()` before reading results. A future
-explicit notification-delivery boundary needs separate review before Network
-Manager integration; it has not been refactored here. Network Manager integration
-remains planned, and original instructor rubric compliance has not been verified
-against an available authoritative handout.
+explicit notification-delivery boundary needs separate review; it has not been
+refactored here. Network integration uses explicit update delivery and does not
+add a results-driven synchronization path or workaround for DM-A07. Original
+instructor rubric compliance has not been verified against an available
+authoritative handout.
 
 
 ## Security Manager
 
 Issue #43 is implemented as an optional role-based access-control manager. Open
 the **Security Manager** dashboard tab and set `enabled` to `true` in the JSON
-policy to activate it. Process IDs are the usernames for File Manager requests.
+policy to activate it. Process IDs are the usernames for File and Network requests.
 Create roles with permissions such as `file:read`, `file:write`, `file:*`, or `*`,
 then assign those roles to users. Users without roles are denied protected
 operations. Path-scoped permissions such as `file:/private/*:read` are supported.
 
-The Security Manager supplies File Manager authorization, records allowed and
+The Security Manager supplies File and Network authorization, records allowed and
 denied decisions, emits warning-level alerts for denials, and retains an
 append-only audit log across simulation resets. Results include `security_users`,
 `security_roles`, `security_events`, `security_alerts`, and `audit_log`; security
@@ -1349,3 +1351,193 @@ to preserve existing simulation workloads. See
 [docs/security_manager.md](docs/security_manager.md) for the policy format, API
 details, and examples. This is an instructional RBAC simulation, not a production
 authentication or security system.
+
+
+## Network Manager
+
+Issue #45 is implemented from typed models through standalone execution,
+SimulationEngine, Flask, and the Network Manager dashboard workspace. It models
+packets and simulated transport, not real sockets or operating-system networking.
+
+### Topology, routing, and scheduling
+
+Nodes have stable IDs and optional display addresses. Links are directed; full
+duplex requires two links. Parallel links and self-links are supported. Node and
+link configuration is immutable and separate from runtime availability, queues,
+operations, and packet history.
+
+Routing uses Dijkstra with positive static link costs and excludes unavailable
+nodes and links. Equal-cost paths are resolved lexicographically by their complete
+link-ID sequences, independent of configuration insertion order. Routing costs
+select paths; they are not transmission durations or congestion weights.
+
+Each link selects waiting packets with FIFO or nonpreemptive PRIORITY scheduling.
+FIFO orders by link enqueue time, then enqueue sequence. PRIORITY orders by lower
+numeric priority first, then enqueue time and sequence. Neither policy interrupts
+an active transmission; priority scheduling has no aging and may starve traffic.
+
+Buffer capacity counts waiting packets only, excluding transmission and
+propagation. A free transmitter can accept a packet with zero waiting capacity.
+Overflow drops the arriving packet with `QUEUE_FULL`; priority does not displace
+an existing waiter. Unreachable destinations produce `NO_ROUTE`. The positive hop
+limit bounds completed forwarding hops; delivery at the limit is allowed, while
+attempting another hop produces `HOP_LIMIT`.
+
+### JSON workload input
+
+Networking is disabled when the top-level `network` object is absent. When the
+object is present, `enabled` defaults to `true`. Disabled configuration is still
+validated and must not contain scheduled events or nonempty process requests.
+
+```json
+{
+  "algorithm": "FCFS",
+  "configuration": {},
+  "memory": {"enabled": false},
+  "network": {
+    "enabled": true,
+    "nodes": [{"node_id": "a"}, {"node_id": "b", "address": "destination"}],
+    "links": [{
+      "link_id": "ab",
+      "source": "a",
+      "destination": "b",
+      "bandwidth_bytes_per_time_unit": 100,
+      "propagation_delay": 0.5,
+      "routing_cost": 1,
+      "queue_policy": "FIFO",
+      "queue_capacity_packets": 0
+    }],
+    "hop_limit": 16,
+    "events": [
+      {"timestamp": 3, "action": "LINK_DOWN", "link_id": "ab"},
+      {"timestamp": 4, "action": "LINK_UP", "link_id": "ab"}
+    ]
+  },
+  "processes": [{
+    "pid": "P",
+    "arrival_time": 0,
+    "burst_time": 1,
+    "network_requests": {
+      "0": {"source": "a", "destination": "b", "size_bytes": 100, "priority": 1}
+    }
+  }]
+}
+```
+
+Defaults are empty `nodes`, `links`, and `events`, and a hop limit of 16.
+Links require IDs, endpoint references, and positive bandwidth. Optional link
+defaults are propagation delay 0, routing cost 1, FIFO policy, and waiting capacity
+0. Packet priority defaults to 1. Packet sizes and hop limits must be positive
+integers; priorities and queue capacities must be nonnegative integers.
+
+Process `network_requests` use canonical string CPU offsets such as `"0"` and
+`"1"`, less than the CPU burst duration. Aliases such as `"01"`, negative offsets,
+duplicate JSON keys, unknown fields/references, invalid enums, boolean numeric
+values, and nonfinite values are rejected. JSON integer fields must fit the
+JavaScript safe integer range. There is one synchronous network request per CPU
+offset. Typed Python callers use `NetworkRequestSpec` with integer offset keys.
+
+### Timing, lifecycle, and simulation controls
+
+All durations use simulated time units. Bandwidth is bytes per simulated time
+unit, so serialization duration is `size_bytes / bandwidth`. Propagation begins
+when serialization finishes and lasts the configured propagation delay.
+Transmission and propagation are separate callbacks, even with zero propagation
+delay. Propagating packets release the transmitter, allowing another transmission
+to overlap. Multi-hop delivery is store-and-forward, with routing at each node.
+
+Use the existing `/api/start`, `/api/step`, `/api/run`, and `/api/reset` endpoints,
+or Process Manager Start/Step/Run/Reset controls. The engine owns the only
+simulation clock, event queue, process transitions, and CPU scheduling. A request
+blocks its process until its matching terminal notification; queue waiting,
+transmission, and propagation contribute to actual blocked time without consuming
+CPU burst time. Local delivery and immediate drops also receive exactly-once
+notification handling. Network requests execute after file, explicit blocking,
+memory, and device requests at a shared CPU offset.
+
+Terminal packet states are DELIVERED, DROPPED, FAILED, and CANCELLED. Link failures
+fail affected transmitting/propagating packets and reroute waiting packets in
+deterministic order, enforcing the destination link's waiting capacity. Node
+failures terminate affected resident/in-flight packets and reroute eligible
+upstream waiters. Recovery does not retry or resurrect terminal packets.
+
+Scheduled events support `LINK_DOWN`/`LINK_UP` with only `link_id`, and
+`NODE_DOWN`/`NODE_UP` with only `node_id`, plus `timestamp` and `action`. The engine
+orders events by timestamp, owner PID or topology target ID, then insertion ID;
+there is no universal failure-before-completion priority. Equal-target controls
+retain configuration order. Run processes all configured controls, including
+those after CPU completion. In the example, delivery is at 1.5, process completion
+at 2.5, and the last recovery extends final simulation time to 4.
+
+Reset preserves configuration, restores UP topology, clears packet history and
+associations, invalidates prior callbacks, and replays configured events.
+Unrepresentable operation times are rejected. Execution failures retain the
+existing HTTP 400 `simulation_failed`/`reset_required` contract; reset and correct
+invalid input before retrying.
+
+### Security and standalone interfaces
+
+With Security enabled, each process send is authorized once using `network:send`.
+The process PID is the security username. Scoped permissions use the canonical
+target `/nodes/<encoded-source>/to/<encoded-destination>`, for example
+`network:/nodes/a/to/b:send`. Denial creates an audited DENIED process outcome
+without creating a packet or blocking the process. Security-disabled workloads
+retain their existing behavior.
+
+The dashboard does not automatically import a differing Security policy.
+Apply that policy through the Security editor before importing a combined
+workload. A mismatched enabled policy is rejected before replacing accepted
+inputs or results. A Network-only import leaves the current Security settings
+unchanged; those settings can affect a demonstration's outcomes.
+
+Standalone callers use `NetworkManager` configuration, submission, scheduling,
+completion, cancellation, failure/recovery, snapshot, metrics, validation, and
+reset methods with explicit timestamps. Returned `NetworkUpdate.operations` must
+be registered in order. If callback registration fails, pass only the unregistered
+suffix to `abort_operations()` and preserve the registered prefix. Engine callers
+apply external lifecycle updates through `engine.apply_network_update(update)` at
+the engine's current time. Network result reads never deliver notifications.
+The Device-specific DM-A07 limitation described above remains deferred.
+
+### Results, metrics, and dashboard
+
+Existing API results include `network_topology`, `network_packets`,
+`network_metrics`, `network_events`, `network_timeline`, and `network_outcomes`.
+These expose topology availability, packet specifications, committed paths, hop
+histories, terminal reasons, process-associated outcomes, and separate transmission
+and propagation intervals. Public engine results hide callback tokens and
+generations. Snapshots are detached; active intervals end at the snapshot time.
+
+Metrics include submitted/delivered/dropped/failed/cancelled counts, delivery
+latency, queue waiting, elapsed transmission/propagation, per-link busy/idle/
+unavailable time, queue integrals and lengths, utilization, throughput, and goodput.
+Latency and duration units are simulated time; queue integrals are packet-time.
+Average delivery latency includes delivered packets only; average queue wait
+includes all accepted packets, including current partial waits and terminal drops.
+
+Utilization is serialization busy time divided by elapsed time since reset,
+including unavailable intervals. Throughput is delivered packets per elapsed time
+unit. Goodput is unique delivered payload bytes per elapsed time unit.
+`delivered_payload_bytes` counts a delivered packet once; per-link `wire_bytes`
+counts partial and aborted serialization at every hop. `serialized_bytes` counts
+only fully serialized hop payloads. Propagation does not count as link busy time.
+Zero-denominator rates and unrepresentable derived metrics are JSON `null`,
+displayed as `—`, without substituting an incorrect zero or emitting Infinity/NaN.
+
+The Network workspace supports topology/request/event editing, a directed graph
+with distinct parallel-link and self-link geometry, status tables, filtered packet
+and hop histories, queue/transport timelines, metrics, and events. Invalid edits
+or imports preserve accepted data; workload controls lock during execution.
+The existing full JSON results export includes Network results.
+
+### Failure demonstration
+
+Load `test_data/milestone4/network_failure.json`, or select **Load network failure
+demonstration** in Network Manager, then Run from Process Manager. Expected
+results and arithmetic are in
+[network_failure_expected.md](test_data/expected_results/network_failure_expected.md).
+With Security disabled or permitting both sends, AB fails at 0.5; the waiting
+packet reroutes through AC/CB and arrives at 2.5. One packet fails, one is delivered,
+and final simulation time is 3.5. AB/AC/CB busy times are 0.5/1/1; total wire traffic
+is 250 bytes while delivered payload is 100 bytes. Reset and replay reproduce the
+same results. Tests cover standalone, engine, API, and Chromium dashboard behavior.

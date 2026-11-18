@@ -774,7 +774,86 @@
 
         <div id="network" class="page">
             <h1>Network Manager</h1>
-            <p>Network manager prototype.</p>
+            <p>Configure directed links and synchronous packet sends. All times use simulated units; full duplex needs two directed links.</p>
+            <section class="card">
+                <h2>Network settings</h2>
+                <button id="load-network-demo" type="button" class="memory-secondary">Load network failure demonstration</button>
+                <p id="network-demo-status" role="status"></p>
+                <p>Combined imports keep the Security editor's policy. Apply a differing enabled policy in Security Manager before importing it.</p>
+                <form id="network-settings-form" novalidate aria-describedby="network-settings-error">
+                    <label><input id="network-enabled" type="checkbox"> Enable networking</label>
+                    <label for="network-hop-limit">Network hop limit</label><input id="network-hop-limit" type="number" min="1" step="1" value="16">
+                    <p id="network-settings-error" class="field-error" role="alert" tabindex="-1"></p>
+                    <button type="submit">Save network settings</button>
+                </form>
+            </section>
+            <section class="card">
+                <h2>Nodes</h2>
+                <form id="network-node-form" novalidate aria-describedby="network-node-error">
+                    <div class="network-fields"><div><label for="network-node-id">Node ID</label><input id="network-node-id" ></div><div><label for="network-node-address">Node address (optional)</label><input id="network-node-address" ></div></div>
+                    <p id="network-node-edit-status" role="status"></p>
+                    <p id="network-node-error" class="field-error" role="alert" tabindex="-1"></p>
+                    <button id="network-node-save" type="submit">Save node</button>
+                    <button id="network-node-clear" type="button" class="memory-secondary">Clear node draft</button>
+                </form>
+                <div class="table-container network-history" tabindex="0" role="region" aria-label="Nodes"><table class="process-table network-small-table"><caption>Nodes</caption><thead><tr><th scope="col">Node</th><th scope="col">Address</th><th scope="col">Actions</th></tr></thead><tbody id="network-node-body"></tbody></table></div>
+            </section>
+            <section class="card">
+                <h2>Directed links</h2>
+                <form id="network-link-form" novalidate aria-describedby="network-link-error">
+                    <div class="network-fields"><div><label for="network-link-id">Link ID</label><input id="network-link-id" ></div><div><label for="network-link-source">Link source</label><select id="network-link-source" ></select></div><div><label for="network-link-destination">Link destination</label><select id="network-link-destination" ></select></div><div><label for="network-bandwidth">Bandwidth (bytes / time unit)</label><input id="network-bandwidth" type="number" min="0" step="any" value="100"></div><div><label for="network-delay">Propagation delay (time units)</label><input id="network-delay" type="number" min="0" step="any" value="1"></div><div><label for="network-cost">Static routing cost</label><input id="network-cost" type="number" min="0" step="any" value="1"></div><div><label for="network-policy">Link queue policy</label><select id="network-policy"><option>FIFO</option><option>PRIORITY</option></select></div><div><label for="network-capacity">Waiting capacity (packets)</label><input id="network-capacity" type="number" min="0" step="1" value="4"></div></div>
+                    <p id="network-link-edit-status" role="status"></p>
+                    <p id="network-link-error" class="field-error" role="alert" tabindex="-1"></p>
+                    <button id="network-link-save" type="submit">Save link</button>
+                    <button id="network-link-clear" type="button" class="memory-secondary">Clear link draft</button>
+                </form>
+                <div class="table-container network-history" tabindex="0" role="region" aria-label="Directed links"><table class="process-table"><caption>Directed links</caption><thead><tr><th scope="col">Link</th><th scope="col">Source → destination</th><th scope="col">Bandwidth</th><th scope="col">Propagation</th><th scope="col">Cost</th><th scope="col">Policy</th><th scope="col">Capacity</th><th scope="col">Actions</th></tr></thead><tbody id="network-link-body"></tbody></table></div>
+            </section>
+            <section class="card">
+                <h2>Process packet requests</h2>
+                <p>One request per CPU offset. FIFO uses enqueue time; PRIORITY uses lower numbers first without preemption or aging. Enabled Security uses network:send permissions.</p>
+                <form id="network-request-form" novalidate aria-describedby="network-request-error">
+                    <div class="network-fields"><div><label for="network-request-pid">Packet process</label><select id="network-request-pid" ></select></div><div><label for="network-request-offset">Packet CPU offset</label><input id="network-request-offset" type="number" min="0" step="1" value="0"></div><div><label for="network-request-source">Packet source</label><select id="network-request-source" ></select></div><div><label for="network-request-destination">Packet destination</label><select id="network-request-destination" ></select></div><div><label for="network-size">Packet size (bytes)</label><input id="network-size" type="number" min="1" step="1" value="100"></div><div><label for="network-priority">Packet priority (lower first)</label><input id="network-priority" type="number" min="0" step="1" value="1"></div></div>
+                    <p id="network-request-edit-status" role="status"></p>
+                    <p id="network-request-error" class="field-error" role="alert" tabindex="-1"></p>
+                    <button id="network-request-save" type="submit">Save request</button>
+                    <button id="network-request-clear" type="button" class="memory-secondary">Clear request draft</button>
+                </form>
+                <div class="table-container network-history" tabindex="0" role="region" aria-label="Process packet requests"><table class="process-table"><caption>Process packet requests</caption><thead><tr><th scope="col">PID</th><th scope="col">Offset</th><th scope="col">Source</th><th scope="col">Destination</th><th scope="col">Bytes</th><th scope="col">Priority</th><th scope="col">Actions</th></tr></thead><tbody id="network-request-body"></tbody></table></div>
+            </section>
+            <section class="card">
+                <h2>Scheduled topology events</h2>
+                <p>Equal timestamps use the engine’s owner/target ID ordering; equal targets retain configuration order. Recovery never retries terminal packets. Run processes all configured events.</p>
+                <form id="network-event-form" novalidate aria-describedby="network-event-error">
+                    <div class="network-fields"><div><label for="network-event-time">Topology timestamp</label><input id="network-event-time" type="number" min="0" step="any" value="0.5"></div><div><label for="network-event-action">Topology action</label><select id="network-event-action"><option>LINK_DOWN</option><option>LINK_UP</option><option>NODE_DOWN</option><option>NODE_UP</option></select></div><div><label for="network-event-target">Topology target</label><select id="network-event-target" ></select></div></div>
+                    <p id="network-event-edit-status" role="status"></p>
+                    <p id="network-event-error" class="field-error" role="alert" tabindex="-1"></p>
+                    <button id="network-event-save" type="submit">Save event</button>
+                    <button id="network-event-clear" type="button" class="memory-secondary">Clear event draft</button>
+                </form>
+                <div class="table-container network-history" tabindex="0" role="region" aria-label="Scheduled topology events"><table class="process-table"><caption>Scheduled topology events</caption><thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Actions</th></tr></thead><tbody id="network-event-body"></tbody></table></div>
+            </section>
+            <section class="card">
+                <h2>Network results</h2>
+                <p id="network-result-status" role="status"></p>
+                <div id="network-summary" class="metric-grid"></div>
+                <p>Utilization = serialization busy / elapsed time since reset. Throughput counts delivered packets / elapsed unit; goodput counts delivered payload bytes / elapsed unit. Queue waiting averages include all accepted packets; delivery latency averages delivered packets only. Unavailable values appear as —.</p>
+                <svg id="network-graph" role="img" aria-label="Directed network topology and availability" viewBox="0 0 760 360"></svg>
+                <p id="network-graph-empty"></p>
+<div class="table-container network-history" tabindex="0" role="region" aria-label="Node availability"><table class="process-table network-small-table"><caption>Node availability</caption><thead><tr><th scope="col">Node</th><th scope="col">Address</th><th scope="col">State</th></tr></thead><tbody id="network-node-status-body"></tbody></table></div>
+<div class="table-container network-history" tabindex="0" role="region" aria-label="Link availability"><table class="process-table"><caption>Link availability</caption><thead><tr><th scope="col">Link</th><th scope="col">Source → destination</th><th scope="col">State</th><th scope="col">Transmitting</th><th scope="col">Waiting</th><th scope="col">Propagating</th></tr></thead><tbody id="network-link-status-body"></tbody></table></div>
+<div class="table-container network-history" tabindex="0" role="region" aria-label="Link performance"><table class="process-table"><caption>Link performance</caption><thead><tr><th scope="col">Link</th><th scope="col">Busy</th><th scope="col">Idle</th><th scope="col">Unavailable</th><th scope="col">Utilization</th><th scope="col">Queue current / max / avg</th><th scope="col">Queue integral</th><th scope="col">Wire bytes</th><th scope="col">Fully serialized bytes</th></tr></thead><tbody id="network-metrics-body"></tbody></table></div>
+                <label for="network-history-filter">Filter packets by ID, PID, node, outcome or reason</label><input id="network-history-filter" type="search">
+
+<div class="table-container network-history" tabindex="0" role="region" aria-label="Packet history"><table class="process-table"><caption>Packet history</caption><thead><tr><th scope="col">Packet</th><th scope="col">PID</th><th scope="col">Source → destination</th><th scope="col">Bytes / priority</th><th scope="col">State / reason</th><th scope="col">Submitted / finished</th><th scope="col">Queue wait</th><th scope="col">TX / propagation elapsed</th><th scope="col">Delivery latency</th><th scope="col">Committed path</th></tr></thead><tbody id="network-history-body"></tbody></table></div>
+<div class="table-container network-history" tabindex="0" role="region" aria-label="Packet hop history"><table class="process-table"><caption>Packet hop history</caption><thead><tr><th scope="col">Packet</th><th scope="col">Link</th><th scope="col">Source → destination</th><th scope="col">TX start / end</th><th scope="col">Propagation start / end</th><th scope="col">Outcome</th></tr></thead><tbody id="network-hops-body"></tbody></table></div>
+<div class="table-container network-history" tabindex="0" role="region" aria-label="Process network outcomes"><table class="process-table"><caption>Process network outcomes</caption><thead><tr><th scope="col">PID</th><th scope="col">Offset</th><th scope="col">Packet</th><th scope="col">Time</th><th scope="col">Outcome</th><th scope="col">Reason</th></tr></thead><tbody id="network-outcomes-body"></tbody></table></div>
+                <h3>Network operation timeline</h3>
+                <p>Intervals use API timestamps. Active intervals end at this snapshot. Zero-duration propagation and failures remain visible as markers.</p>
+                <div class="gantt-legend"><span class="network-wait">Queue waiting</span><span class="network-transmission">Transmission</span><span class="network-propagation">Propagation</span><span class="network-failure">Drop / failure / cancellation</span></div>
+                <div id="network-timeline" class="network-history" role="list" aria-label="Network operation timeline"></div>
+<div class="table-container network-history" tabindex="0" role="region" aria-label="Network event history"><table class="process-table"><caption>Network event history</caption><thead><tr><th scope="col">Time</th><th scope="col">Entity</th><th scope="col">Packet / PID</th><th scope="col">Event</th><th scope="col">Outcome</th><th scope="col">Details</th></tr></thead><tbody id="network-events-body"></tbody></table></div>
+            </section>
         </div>
 
         <div id="parallel" class="page">
@@ -801,8 +880,10 @@
 
     <script src="input-validation.js"></script>
     <script src="device-validation.js"></script>
+    <script src="network-validation.js"></script>
     <script src="memory-results.js"></script>
     <script src="device-results.js"></script>
+    <script src="network-results.js"></script>
     <script src="script.js"></script>
     <script src="manager-exports.js"></script>
     <script src="manager-tests.js"></script>
@@ -810,6 +891,7 @@
     <script src="file-input.js"></script>
     <script src="memory-comparison.js"></script>
     <script src="device-input.js"></script>
+    <script src="network-input.js"></script>
     <script src="security-manager.js"></script>
 
 </body>

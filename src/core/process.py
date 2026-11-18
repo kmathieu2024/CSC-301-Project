@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.managers.device import DeviceRequestSpec
+    from src.managers.network import NetworkRequestSpec
 
 
 class ProcessState(Enum):
@@ -39,6 +40,9 @@ class Process:
     device_requests: dict[int, DeviceRequestSpec] = field(
         default_factory=dict, kw_only=True,
     )
+    network_requests: dict[int, NetworkRequestSpec] = field(
+        default_factory=dict, kw_only=True,
+    )
 
     # Simulation state
     remaining_time: int = 0
@@ -58,6 +62,10 @@ class Process:
         if not isinstance(self.device_requests, Mapping):
             raise ValueError("device_requests must be an offset-to-spec mapping")
         self.device_requests = dict(self.device_requests)
+        if not isinstance(self.network_requests, Mapping):
+            raise ValueError("network_requests must be an offset-to-spec mapping")
+        # Topology-dependent validation is performed by SimulationEngine.
+        self.network_requests = dict(self.network_requests)
 
     def reset(self):
         """Reset the process so the simulation can run again."""

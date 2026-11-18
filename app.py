@@ -11,6 +11,10 @@ from src.managers.memory.memory_manager import MemoryManager
 from src.managers.device import DeviceManager
 from src.managers.device.json_inputs import parse_device_configs, parse_device_requests
 from src.managers.security import SecurityManager
+from src.managers.network import NetworkManager
+from src.managers.network.json_inputs import (
+    parse_network_requests, parse_network_settings, validate_json_numbers,
+)
 
 
 app = Flask(__name__)
@@ -108,6 +112,8 @@ def dashboard():
 
 @app.route("/<path:filename>")
 def dashboard_files(filename):
+    if filename == "network-demo.json":
+        return send_from_directory("test_data/milestone4", "network_failure.json")
     if filename == "device-demo.json":
         return send_from_directory("test_data/milestone4", "devices.json")
     return send_from_directory("dashboard", filename)
@@ -170,7 +176,15 @@ def start():
             raise ValueError("Memory references must belong to an existing process")
         if "device_requests" in data:
             raise ValueError("Device requests must belong to an existing process")
+        if "network_requests" in data:
+            raise ValueError("Network requests must belong to an existing process")
+        if "network_events" in data:
+            raise ValueError("Network events must belong to network.events")
         device_configs = parse_device_configs(data.get("devices", []))
+        if "network" in data:
+            validate_json_numbers(data)
+        network_settings = (parse_network_settings(data["network"])
+                            if "network" in data else None)
 
         # Get the processes from the dashboard.
         processes = []
@@ -193,6 +207,10 @@ def start():
                 },
                 device_requests=parse_device_requests(
                     item.get("device_requests", {}), item["burst_time"], device_configs,
+                ),
+                network_requests=parse_network_requests(
+                    item.get("network_requests", {}), item["burst_time"],
+                    network_settings,
                 ),
             )
 
@@ -237,6 +255,9 @@ def start():
             device_manager=DeviceManager(list(device_configs.values()))
             if device_configs else None,
             security_manager=security_manager,
+            network_manager=NetworkManager(network_settings.config)
+            if network_settings is not None and network_settings.enabled else None,
+            network_events=network_settings.events if network_settings else (),
         )
 
         result = _simulation_response(candidate.results())

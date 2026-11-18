@@ -1,13 +1,21 @@
 
 import random
 import math
+from collections.abc import Sequence
 from typing import Any
+from urllib.parse import quote
 
 from src.core.process import Process, ProcessState
 from src.managers.device import DeviceManager, DeviceOperation, validate_request_offsets
 from src.managers.memory.memory_manager import NoFrameAvailable
 from src.managers.file import FileManager
 from src.managers.process.scheduler import Scheduler, validate_processes
+from src.managers.network import (
+    NetworkManager, NetworkOperation, NetworkUpdate, NetworkTopologyEvent,
+    TopologyAction, packet_identifier, validate_topology_events,
+    validate_request_offsets as validate_network_offsets,
+    validate_request_spec as validate_network_spec,
+)
 
 
 class SimulationExecutionError(RuntimeError):
@@ -22,7 +30,8 @@ class SimulationEngine:
              aging_interval=4, context_switch=0,
              scenario_id="default", seed=0, memory_manager=None,
              file_manager=None, device_manager: DeviceManager | None = None,
-             security_manager=None):
+             security_manager=None, network_manager: NetworkManager | None = None,
+             network_events: Sequence[NetworkTopologyEvent] = ()):
 
         self.processes = list(processes)
         validate_processes(self.processes)
@@ -63,6 +72,22 @@ class SimulationEngine:
             for process in self.processes:
                 validate_request_offsets(
                     process.device_requests, process.burst_time, configs,
+                )
+        self.network_manager = network_manager
+        if network_manager is None:
+            if network_events:
+                raise ValueError("Network events require a network manager")
+            if not isinstance(network_events, (list, tuple)):
+                raise ValueError("network events must be a list or tuple")
+            self.network_events = ()
+            if any(p.network_requests for p in self.processes):
+                raise ValueError("Network requests require a network manager")
+        else:
+            config = network_manager.runtime.config
+            self.network_events = validate_topology_events(network_events, config)
+            for process in self.processes:
+                validate_network_offsets(
+                    process.network_requests, process.burst_time, config,
                 )
 
         for process in self.processes:
@@ -134,6 +159,13 @@ class SimulationEngine:
         self._device_event_cursor = self._device_notification_cursor = 0
         if self.device_manager is not None:
             self.device_manager.reset(timestamp=0)
+        self._network_submitted: dict[tuple[str, float], str | None] = {}
+        self._network_waiting: dict[str, tuple[Process, float]] = {}
+        self._network_outcomes: dict[str, dict[str, Any]] = {}
+        self._network_submission_id: str | None = None
+        self._network_event_cursor = 0
+        if self.network_manager is not None:
+            self.network_manager.reset(now=0)
 
         # Add aarrivals to the event queue.
 
@@ -143,6 +175,8 @@ class SimulationEngine:
                 "arrival",
                 process
             )
+        for event in self.network_events:
+            self.schedule_event(event.timestamp, "network_topology", event)
 
     def schedule_event(self, time, event_type, process):
         # Store upcoming events in chronological order.
@@ -151,7 +185,10 @@ class SimulationEngine:
         if time < self.current_time:
             raise ValueError("Cannot schedule an event in the past")
 
-        if event_type not in ("arrival", "unblock", "device_complete"):
+        if event_type not in (
+            "arrival", "unblock", "device_complete", "network_complete",
+            "network_topology",
+        ):
             raise ValueError("Unsupported event type: " + event_type)
 
         # Sort by time, owner PID (device ID for endpoint travel), insertion ID.
@@ -161,6 +198,14 @@ class SimulationEngine:
             device_id, operation = process
             request = self.device_manager.requests.get(operation.request_id)
             order_key = request.pid if request is not None else device_id
+        elif event_type == "network_complete":
+            order_key = self.network_manager.runtime.packets[process.packet_id].pid
+        elif event_type == "network_topology":
+            if (self.network_manager is None
+                    or not isinstance(process, NetworkTopologyEvent)):
+                raise ValueError("Topology controls require a configured network event")
+            order_key = (process.link_id if process.link_id is not None
+                         else process.node_id)
         else:
             order_key = process.pid
         entry = (
@@ -199,6 +244,7 @@ class SimulationEngine:
         # Dispatch due events. Legacy process events retain their original order.
 
         self._sync_device_state()
+        self._sync_network_state()
 
         while self.event_queue and self.event_queue[0][0] <= self.current_time:
 
@@ -206,6 +252,12 @@ class SimulationEngine:
 
             if event_type == "device_complete":
                 self._complete_device_operation(*process)
+                continue
+            if event_type == "network_complete":
+                self._complete_network_operation(process)
+                continue
+            if event_type == "network_topology":
+                self._apply_network_topology_event(process)
                 continue
 
             expected = ProcessState.NEW if event_type == "arrival" else ProcessState.WAITING
@@ -433,6 +485,329 @@ class SimulationEngine:
         finally:
             self._device_submission_id = previous_submission
 
+    @staticmethod
+    def _network_target(source: str, destination: str) -> str:
+        """Canonical RBAC path; node IDs cannot inject POSIX path segments."""
+        def encode(node: str) -> str:
+            return quote(node, safe="").replace(".", "%2E")
+
+        return f"/nodes/{encode(source)}/to/{encode(destination)}"
+
+    def _sync_network_state(self) -> None:
+        """Import history and deliver outcomes only at explicit execution boundaries.
+
+        External callers must pass manager failure/cancellation updates through
+        apply_network_update, including their operation instructions. Results
+        never calls this method. NetworkManager remains callback identity owner.
+        """
+        if self.network_manager is None:
+            return
+        snapshot = self.network_manager.snapshot(self.current_time)
+        for event in snapshot["events"][self._network_event_cursor:]:
+            self.events.append({**event, "scenario_id": self.scenario_id})
+        self._network_event_cursor = len(snapshot["events"])
+        self._deliver_network_notifications(snapshot)
+
+    def _deliver_network_notifications(self, snapshot: dict[str, Any]) -> None:
+        """Validate packet/PID ownership before exactly-once wakeup and accounting."""
+        generation = self.network_manager.runtime.generation
+        for packet_id, notice in snapshot["notifications"].items():
+            waiting = self._network_waiting.get(packet_id)
+            if waiting is None or packet_id == self._network_submission_id:
+                continue
+            process, started = waiting
+            packet = snapshot["packets"].get(packet_id)
+            if (packet is None or notice["packet_id"] != packet_id
+                    or notice["pid"] != packet["pid"] or process.pid != notice["pid"]
+                    or notice["source"] != packet["spec"]["source"]
+                    or notice["destination"] != packet["spec"]["destination"]
+                    or notice["generation"] != packet["generation"]
+                    or notice["generation"] != generation
+                    or notice["outcome"] != packet["state"]
+                    or notice["reason"] != packet["reason"]
+                    or notice["timestamp"] != packet["finished_at"]
+                    or notice["timestamp"] != self.current_time
+                    or process.state != ProcessState.WAITING):
+                raise ValueError("Network notification does not match waiting process")
+            del self._network_waiting[packet_id]
+            process.blocked_time += self.current_time - started
+            old_state = process.state
+            process.state = ProcessState.READY
+            self.scheduler.on_ready(process, self.current_time)
+            outcome = {key: value for key, value in notice.items()
+                       if key != "generation"}
+            outcome["request_offset"] = next(
+                key[1] for key, value in self._network_submitted.items()
+                if value == packet_id
+            )
+            self._network_outcomes[packet_id] = outcome
+            self.log(process, "unblock", "network_interrupt", old_state,
+                     self.current_time - started)
+            self.events[-1].update({
+                "packet_id": packet_id, "network_outcome": notice["outcome"],
+                "outcome": "success" if notice["outcome"] == "DELIVERED" else "error",
+                "message": notice["reason"],
+            })
+
+    @staticmethod
+    def _network_cleanup_note(error: Exception, cleanup: Exception) -> None:
+        """Retain nested cleanup diagnostics without replacing the primary error."""
+        error.add_note("Network cleanup failed: " + repr(cleanup))
+        for note in getattr(cleanup, "__notes__", ()):
+            error.add_note(note)
+
+    def _register_network_update(self, update: NetworkUpdate) -> None:
+        """Register ordered instructions; invalidate only an unregistered suffix."""
+        if not isinstance(update, NetworkUpdate):
+            raise ValueError("Expected NetworkUpdate")
+        for index, operation in enumerate(update.operations):
+            active = self.network_manager.runtime.operations.get(operation.token)
+            if active != operation:
+                continue
+            # The existing queue is the registration record, not a second token
+            # registry. Reapplying an update must not create duplicate callbacks.
+            if any(entry[3] == "network_complete" and entry[4] == operation
+                   for entry in self.event_queue):
+                continue
+            try:
+                self.schedule_event(operation.due_at, "network_complete", operation)
+            except Exception as error:
+                suffix = update.operations[index:]
+                # Registration may append and then raise; remove only that
+                # suffix's callbacks, leaving the registered prefix untouched.
+                self.event_queue[:] = [
+                    entry for entry in self.event_queue
+                    if not (entry[3] == "network_complete" and entry[4] in suffix)
+                ]
+                try:
+                    cleanup = self.network_manager.abort_operations(
+                        suffix, self.current_time,
+                    )
+                    if cleanup.operations:
+                        self._register_network_update(cleanup)
+                except Exception as cleanup_error:
+                    self._network_cleanup_note(error, cleanup_error)
+                    # If the abort entry point failed before doing any cleanup,
+                    # cancel only the suffix's still-owned packets. A registered
+                    # prefix must retain both its operation and process owner.
+                    for failed in suffix:
+                        active = self.network_manager.runtime.operations.get(
+                            failed.token,
+                        )
+                        if active != failed:
+                            continue
+                        try:
+                            fallback = self.network_manager.cancel_packet(
+                                failed.packet_id, self.current_time,
+                            )
+                            if fallback.operations:
+                                self._register_network_update(fallback)
+                        except Exception as fallback_error:
+                            self._network_cleanup_note(error, fallback_error)
+                try:
+                    self._sync_network_state()
+                except Exception as cleanup_error:
+                    self._network_cleanup_note(error, cleanup_error)
+                raise
+        self._sync_network_state()
+
+    def apply_network_update(self, update: NetworkUpdate) -> None:
+        """Apply external manager actions at current_time, never through results().
+
+        Example: engine.apply_network_update(manager.fail_link(id, current_time)).
+        Handles returned callbacks and authoritative notification history, then
+        dispatches eligible queues. Unexpected failures require engine reset.
+        """
+        self._raise_if_failed()
+        if self.network_manager is None:
+            raise ValueError("Network updates require a network manager")
+        try:
+            self._register_network_update(update)
+            self._register_network_update(
+                self.network_manager.schedule_network(self.current_time),
+            )
+        except Exception as error:
+            self._fail_execution(error)
+
+    def _apply_network_topology_event(self, event: NetworkTopologyEvent) -> None:
+        """Execute configured controls with the normal queue order and safety contract."""
+        actions = {
+            TopologyAction.LINK_DOWN: self.network_manager.fail_link,
+            TopologyAction.LINK_UP: self.network_manager.recover_link,
+            TopologyAction.NODE_DOWN: self.network_manager.fail_node,
+            TopologyAction.NODE_UP: self.network_manager.recover_node,
+        }
+        target = event.link_id if event.link_id is not None else event.node_id
+        try:
+            update = actions[event.action](target, self.current_time)
+        except Exception as error:
+            try:
+                self._sync_network_state()
+            except Exception as cleanup_error:
+                self._network_cleanup_note(error, cleanup_error)
+            raise
+        self.apply_network_update(update)
+
+    def _complete_network_operation(self, operation: NetworkOperation) -> None:
+        """Dispatch serialization/propagation boundaries without charging CPU time."""
+        try:
+            update = self.network_manager.complete_operation(
+                operation, self.current_time,
+            )
+        except Exception as error:
+            try:
+                self._sync_network_state()
+            except Exception as cleanup_error:
+                self._network_cleanup_note(error, cleanup_error)
+            raise
+        self._register_network_update(update)
+
+    def _submit_network_request(
+        self, process: Process, key: tuple[str, float],
+    ) -> bool:
+        """Authorize once, associate before publication, and synchronously block."""
+        spec = process.network_requests[key[1]]
+        validate_network_spec(spec, self.network_manager.runtime.config)
+        if self.security_manager is not None:
+            self.security_manager.set_context(self.current_time, self.scenario_id)
+            try:
+                allowed = self.security_manager.authorize(
+                    process.pid, "send", self._network_target(
+                        spec.source, spec.destination,
+                    ), resource="network",
+                )
+            finally:
+                self._sync_security_events()
+            if not allowed:
+                self._network_submitted[key] = None
+                self._network_outcomes[f"denied:{process.pid}:{key[1]}"] = {
+                    "packet_id": None, "pid": process.pid, "request_offset": key[1],
+                    "source": spec.source, "destination": spec.destination,
+                    "timestamp": self.current_time, "outcome": "DENIED",
+                    "reason": "ACCESS_DENIED",
+                }
+                self.log(process, "network_denied", "network_send", process.state)
+                self.events[-1].update({
+                    "outcome": "denied", "message": "ACCESS_DENIED",
+                })
+                return False
+        old_state, blocked_time = process.state, process.blocked_time
+        previous_submission = self._network_submission_id
+        expected_id = packet_identifier(
+            self.network_manager.runtime.next_packet_sequence,
+        )
+        self._network_submission_id = expected_id
+        packet_id = None
+        try:
+            packet_id = self.network_manager.submit_packet(
+                process.pid, spec, self.current_time,
+            )
+            self._network_submission_id = packet_id
+            self._network_submitted[key] = packet_id
+            self._network_waiting[packet_id] = process, self.current_time
+            process.state = ProcessState.WAITING
+            self.log(process, "block", "wait_for_network", old_state)
+            self.events[-1]["packet_id"] = packet_id
+            self._register_network_update(
+                self.network_manager.schedule_network(self.current_time),
+            )
+            return True
+        except Exception as error:
+            packet_id = packet_id or expected_id
+            runtime = self.network_manager.runtime
+            packet = runtime.packets.get(packet_id)
+            registered = any(
+                entry[3] == "network_complete" and entry[4].packet_id == packet_id
+                and runtime.operations.get(entry[4].token) == entry[4]
+                for entry in self.event_queue
+            )
+            # A different operation can fail after this packet's callback was
+            # registered. Preserve that valid prefix and its waiting association.
+            if not registered:
+                self._network_waiting.pop(packet_id, None)
+                self._network_submitted.pop(key, None)
+                process.state, process.blocked_time = old_state, blocked_time
+                try:
+                    if packet is not None:
+                        cleanup = self.network_manager.cancel_packet(
+                            packet_id, self.current_time,
+                        )
+                        self._register_network_update(cleanup)
+                except Exception as cleanup_error:
+                    self._network_cleanup_note(error, cleanup_error)
+            try:
+                self._sync_network_state()
+            except Exception as cleanup_error:
+                self._network_cleanup_note(error, cleanup_error)
+            raise
+        finally:
+            self._network_submission_id = previous_submission
+
+    def _has_network_work(self) -> bool:
+        """Only live operations/queues prolong execution, never stale callbacks."""
+        if self.network_manager is None:
+            return False
+        runtime = self.network_manager.runtime
+        return bool(runtime.operations or any(
+            link.queue for link in runtime.links.values()
+        ) or any(entry[3] == "network_topology" for entry in self.event_queue))
+
+    @staticmethod
+    def _observable_network_data(value: Any) -> Any:
+        """Hide callback generations and tokens without changing manager snapshots."""
+        if isinstance(value, dict):
+            hidden = {"token", "operation_token", "generation", "packet_generation",
+                      "operation_generation"}
+            record = isinstance(value.get("packet_id"), str) and any(
+                key in value for key in ("spec", "kind", "outcome")
+            )
+            return {key: SimulationEngine._observable_network_data(item)
+                    for key, item in value.items() if not record or key not in hidden}
+        if isinstance(value, list):
+            return [SimulationEngine._observable_network_data(item) for item in value]
+        return value
+
+    def _network_results(self) -> dict[str, Any]:
+        """Read-only network results; notification delivery has no path through here."""
+        snapshot = (self.network_manager.snapshot(self.current_time)
+                    if self.network_manager is not None else None)
+        timeline = []
+        if snapshot:
+            for packet_id, hops in snapshot["hop_history"].items():
+                for hop in hops:
+                    for kind in ("transmission", "propagation"):
+                        start = hop[kind + "_start"]
+                        end = hop[kind + "_end"]
+                        if start is not None:
+                            timeline.append({
+                                "packet_id": packet_id,
+                                "pid": snapshot["packets"][packet_id]["pid"],
+                                "link_id": hop["link_id"], "kind": kind.upper(),
+                                "start": start, "end": end if end is not None
+                                else self.current_time, "active": end is None,
+                                "outcome": hop["outcome"],
+                            })
+        return self._observable_network_data({
+            "network_topology": {
+                **{key: snapshot[key] for key in ("config", "nodes", "links")},
+                "events": [{
+                    "timestamp": event.timestamp, "action": event.action.value,
+                    **({"link_id": event.link_id} if event.link_id is not None
+                       else {"node_id": event.node_id}),
+                } for event in self.network_events],
+            } if snapshot else {},
+            "network_packets": {
+                key: {**packet, "path": snapshot["packet_paths"][key],
+                      "hops": snapshot["hop_history"][key]}
+                for key, packet in snapshot["packets"].items()
+            } if snapshot else {},
+            "network_metrics": snapshot["metrics"] if snapshot else None,
+            "network_events": [{**event, "scenario_id": self.scenario_id}
+                               for event in snapshot["events"]] if snapshot else [],
+            "network_timeline": timeline,
+            "network_outcomes": self._network_outcomes.copy(),
+        })
+
     def _block_process(self, process, duration):
         process.blocked_time += duration
         old_state = process.state
@@ -489,7 +864,7 @@ class SimulationEngine:
     def _execute(self):
         # Run the simulation until all processess finish.
 
-        while self.completed < len(self.processes) or self._has_device_work():
+        while self._unfinished():
 
             self.check_arrivals()
 
@@ -500,7 +875,8 @@ class SimulationEngine:
             while not ready:
 
                 if (self.completed == len(self.processes)
-                        and not self._has_device_work()):
+                        and not self._has_device_work()
+                        and not self._has_network_work()):
                     return
 
                 if not self.event_queue:
@@ -681,6 +1057,10 @@ class SimulationEngine:
                         and key not in self._device_submitted):
                     self._submit_device_request(process, key)
                     break
+                if (executed in process.network_requests
+                        and key not in self._network_submitted):
+                    if self._submit_network_request(process, key):
+                        break
 
                 duration = process.remaining_time
                 future_offsets = [offset for offset in process.blocking_requests if offset > executed]
@@ -691,6 +1071,9 @@ class SimulationEngine:
                 ]
                 future_offsets += [
                     offset for offset in process.device_requests if offset > executed
+                ]
+                future_offsets += [
+                    offset for offset in process.network_requests if offset > executed
                 ]
                 if future_offsets:
                     duration = min(duration, min(future_offsets) - executed)
@@ -818,6 +1201,9 @@ class SimulationEngine:
 
             self.last_pid = process.pid
 
+            # Local delivery/drop can finish during submission. Deliver only
+            # after on_cpu_stop so the process is readied exactly once.
+            self._sync_network_state()
             yield self.results()
 
     def _sync_security_events(self) -> None:
@@ -888,7 +1274,8 @@ class SimulationEngine:
         self._raise_if_failed()
 
     def _unfinished(self) -> bool:
-        return self.completed < len(self.processes) or self._has_device_work()
+        return (self.completed < len(self.processes) or self._has_device_work()
+                or self._has_network_work())
 
     def _progress_marker(self) -> tuple:
         """Include zero-time dispatch, blocking, and callback progress."""
@@ -1069,6 +1456,7 @@ class SimulationEngine:
 
         return {
             "execution_error": self.execution_error,
+            **self._network_results(),
             "devices": {
                 key: self._observable_device_data(value)
                 for key, value in device["devices"].items()
