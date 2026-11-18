@@ -384,6 +384,7 @@ in memory and are reset when a new `FileManager` instance is created.
 - Report aggregate file-content storage with `storage_used()` or `STORAGE`.
 - Enforce the stored three-character `rwx` mask; the mask is a simple shared
   permission class applied to requests, while `owner` records the creator identity.
+  Creating a file or directory also requires write permission on its parent directory.
 - Maintain a separate current working directory for each process while sharing
   the same file and directory tree. Pass a `process_id` to use a process-specific
   working directory. Omitting it uses the default context for compatibility.
