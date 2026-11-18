@@ -186,7 +186,8 @@ class FileManager:
     @staticmethod
     def _check_permissions(node: _Node, action: str) -> None:
         required = {"read": "r", "list": "r", "metadata": "r", "cd": "x",
-                    "write": "w", "delete": "w", "rmdir": "w"}.get(action)
+                    "write": "w", "create": "w", "mkdir": "w",
+                    "delete": "w", "rmdir": "w"}.get(action)
         if required and required not in node.metadata.permissions:
             raise AuthorizationError(f"Permission denied: {required} permission required")
 

@@ -11,7 +11,8 @@
 - Process requests pass `process.pid` as the requesting user. Files and directories
   created through process commands record that identity as their owner.
 - The stored three-character `rwx` mask is checked for read, write, list,
-  metadata, navigation, and directory/file mutation operations. `CHMOD path rw-`
+  metadata, navigation, and directory/file mutation operations. Creating a file
+  or directory requires write permission on its parent directory. `CHMOD path rw-`
   updates the mask; only the recorded owner (or a direct system/default caller)
   may change it. The current mask is one shared permission class, not separate
   owner/group/other bits. The injected authorizer remains an additional policy hook.

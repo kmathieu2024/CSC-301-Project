@@ -585,6 +585,23 @@ def test_permissions_mask_is_enforced():
         fs.write_file("/private.txt", "changed")
 
 
+def test_parent_write_permission_is_required_to_create_entries():
+    fs = FileManager()
+    fs.make_directory("/restricted")
+    fs.set_permissions("/restricted", "r-x")
+    before = snapshot_tree(fs._root)
+
+    # Creating entries changes the parent directory, so its write bit is
+    # required for both files and subdirectories.
+    with pytest.raises(AuthorizationError):
+        fs.create_file("/restricted/blocked.txt")
+    with pytest.raises(AuthorizationError):
+        fs.make_directory("/restricted/blocked")
+
+    assert snapshot_tree(fs._root) == before
+    assert fs.list_directory("/restricted") == []
+
+
 def test_open_close_modes_and_invalid_handles():
     fs = FileManager()
     fs.create_file("/data.txt", "hello")
