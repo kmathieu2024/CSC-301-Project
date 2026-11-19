@@ -33,11 +33,11 @@ function clearManagerTestMode() {
     clearManagerTestVerdict();
 }
 
-function loadManagerTest(manager) {
+async function loadManagerTest(manager) {
     if (busy || running) return;
     try {
         // The same validation and atomic replacement path as JSON workload import.
-        loadWorkload(managerTestWorkload(manager));
+        await loadWorkload(managerTestWorkload(manager));
         activeManagerTest = manager;
         processError.textContent = "";
         uploadStatus.textContent = "";

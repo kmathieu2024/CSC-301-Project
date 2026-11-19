@@ -420,7 +420,8 @@ def test_combined_managers_and_security_preserve_shared_offset_order(
                         "default_service_time": 1}]
     data["security"] = {
         "enabled": True,
-        "roles": [{"name": "worker", "permissions": ["file:create", "network:send"]}],
+        "roles": [{"name": "worker", "permissions": [
+            "file:create", "device:read", "network:send"]}],
         "users": [{"username": "P", "roles": ["worker"]}],
     }
     data["processes"][0].update(
@@ -438,7 +439,7 @@ def test_combined_managers_and_security_preserve_shared_offset_order(
     assert result["device_metrics"]["devices"]["keyboard"]["submitted"] == 1
     assert [(e["resource_type"], e["timestamp"])
             for e in result["security_events"]] == [
-        ("file", 0), ("network", 3),
+        ("file", 0), ("device", 2), ("network", 3),
     ]
     json.dumps(result, allow_nan=False)
 

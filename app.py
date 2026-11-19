@@ -164,106 +164,129 @@ def validate_blocking_requests(requests, burst):
     return validated
 
 
+def build_simulation_candidate(data: Any) -> SimulationEngine:
+    """Validate and allocate a detached run without touching the accepted engine."""
+    if not isinstance(data, dict):
+        raise ValueError("Simulation input must be an object")
+    if "memory_references" in data:
+        raise ValueError("Memory references must belong to an existing process")
+    if "device_requests" in data:
+        raise ValueError("Device requests must belong to an existing process")
+    if "network_requests" in data:
+        raise ValueError("Network requests must belong to an existing process")
+    if "network_events" in data:
+        raise ValueError("Network events must belong to network.events")
+    device_configs = parse_device_configs(data.get("devices", []))
+    if "network" in data:
+        validate_json_numbers(data)
+    network_settings = (parse_network_settings(data["network"])
+                        if "network" in data else None)
+
+    # Get the processes from the dashboard.
+    processes = []
+
+    for item in data["processes"]:
+        process = Process(
+            item["pid"],
+            item["arrival_time"],
+            item["burst_time"],
+            item.get("priority", 1),
+            memory_references=validate_memory_references(
+                item.get("memory_references", {}), item["burst_time"]
+            ),
+            blocking_requests=validate_blocking_requests(
+                item.get("blocking_requests", {}), item["burst_time"]
+            ),
+            file_requests={
+                int(offset): command
+                for offset, command in item.get("file_requests", {}).items()
+            },
+            device_requests=parse_device_requests(
+                item.get("device_requests", {}), item["burst_time"], device_configs,
+            ),
+            network_requests=parse_network_requests(
+                item.get("network_requests", {}), item["burst_time"],
+                network_settings,
+            ),
+        )
+
+        processes.append(process)
+
+    # Get the scheduling settings.
+    config = data["configuration"]
+    memory_config = data.get("memory", {})
+    if not isinstance(memory_config, dict):
+        raise ValueError("Memory settings must be an object")
+    if not isinstance(memory_config.get("enabled", True), bool):
+        raise ValueError("Memory enabled must be boolean")
+
+    memory_manager = None
+
+    # Validate settings without allocating frames when memory is disabled.
+    for key in ("frame_count", "page_size"):
+        value = memory_config.get(key, 3 if key == "frame_count" else 4)
+        if isinstance(value, int) and value > 9007199254740991:
+            raise ValueError(key + " exceeds the supported integer range")
+    memory_settings = {
+        "frame_count": memory_config.get("frame_count", 3),
+        "page_size": memory_config.get("page_size", 4),
+        "algorithm": memory_config.get("algorithm", "fifo"),
+        "fault_latency": memory_config.get("fault_latency", 0),
+    }
+    MemoryManager.validate_configuration(**memory_settings)
+    if memory_config.get("algorithm", "fifo") not in ("fifo", "lru"):
+        raise ValueError("Memory policy must be fifo or lru")
+    if memory_config.get("enabled", True):
+        memory_manager = MemoryManager(**memory_settings)
+    security_manager = build_security_manager(
+        data.get("security"), [process.pid for process in processes]
+    )
+    candidate = SimulationEngine(
+        processes,
+        algorithm=data["algorithm"],
+        quantum=config.get("time_quantum", 4),
+        aging_interval=config.get("aging_interval", 4),
+        context_switch=config.get("context_switch_cost", 0),
+        memory_manager=memory_manager,
+        device_manager=DeviceManager(list(device_configs.values()))
+        if device_configs else None,
+        security_manager=security_manager,
+        network_manager=NetworkManager(network_settings.config)
+        if network_settings is not None and network_settings.enabled else None,
+        network_events=network_settings.events if network_settings else (),
+    )
+
+    return candidate
+
+
+def read_workload_candidate() -> SimulationEngine:
+    """Parse one request with the same duplicate-key rules for Start and Validate."""
+    data = json.loads(
+        request.get_data(as_text=True), object_pairs_hook=reject_duplicate_keys,
+    )
+    return build_simulation_candidate(data)
+
+
+@app.route("/api/validate", methods=["POST"])
+def validate_workload() -> Response | tuple[Response, int]:
+    """Validate a disposable candidate; never inspect or replace the accepted run."""
+    try:
+        candidate = read_workload_candidate()
+        return jsonify({"valid": True,
+                        "security_enabled": candidate.security_manager is not None})
+    except (ValueError, TypeError, KeyError, AttributeError) as error:
+        return jsonify({"error": str(error), "code": "invalid_workload"}), 400
+
+
 @app.route("/api/start", methods=["POST"])
 def start():
+    """Replace the accepted engine only after candidate validation succeeds."""
     global engine
-
     try:
-        data = json.loads(request.get_data(as_text=True), object_pairs_hook=reject_duplicate_keys)
-        if not isinstance(data, dict):
-            raise ValueError("Simulation input must be an object")
-        if "memory_references" in data:
-            raise ValueError("Memory references must belong to an existing process")
-        if "device_requests" in data:
-            raise ValueError("Device requests must belong to an existing process")
-        if "network_requests" in data:
-            raise ValueError("Network requests must belong to an existing process")
-        if "network_events" in data:
-            raise ValueError("Network events must belong to network.events")
-        device_configs = parse_device_configs(data.get("devices", []))
-        if "network" in data:
-            validate_json_numbers(data)
-        network_settings = (parse_network_settings(data["network"])
-                            if "network" in data else None)
-
-        # Get the processes from the dashboard.
-        processes = []
-
-        for item in data["processes"]:
-            process = Process(
-                item["pid"],
-                item["arrival_time"],
-                item["burst_time"],
-                item.get("priority", 1),
-                memory_references=validate_memory_references(
-                    item.get("memory_references", {}), item["burst_time"]
-                ),
-                blocking_requests=validate_blocking_requests(
-                    item.get("blocking_requests", {}), item["burst_time"]
-                ),
-                file_requests={
-                    int(offset): command
-                    for offset, command in item.get("file_requests", {}).items()
-                },
-                device_requests=parse_device_requests(
-                    item.get("device_requests", {}), item["burst_time"], device_configs,
-                ),
-                network_requests=parse_network_requests(
-                    item.get("network_requests", {}), item["burst_time"],
-                    network_settings,
-                ),
-            )
-
-            processes.append(process)
-
-        # Get the scheduling settings.
-        config = data["configuration"]
-        memory_config = data.get("memory", {})
-        if not isinstance(memory_config, dict):
-            raise ValueError("Memory settings must be an object")
-        if not isinstance(memory_config.get("enabled", True), bool):
-            raise ValueError("Memory enabled must be boolean")
-
-        memory_manager = None
-
-        # Validate settings without allocating frames when memory is disabled.
-        for key in ("frame_count", "page_size"):
-            value = memory_config.get(key, 3 if key == "frame_count" else 4)
-            if isinstance(value, int) and value > 9007199254740991:
-                raise ValueError(key + " exceeds the supported integer range")
-        memory_settings = {
-            "frame_count": memory_config.get("frame_count", 3),
-            "page_size": memory_config.get("page_size", 4),
-            "algorithm": memory_config.get("algorithm", "fifo"),
-            "fault_latency": memory_config.get("fault_latency", 0),
-        }
-        MemoryManager.validate_configuration(**memory_settings)
-        if memory_config.get("algorithm", "fifo") not in ("fifo", "lru"):
-            raise ValueError("Memory policy must be fifo or lru")
-        if memory_config.get("enabled", True):
-            memory_manager = MemoryManager(**memory_settings)
-        security_manager = build_security_manager(
-            data.get("security"), [process.pid for process in processes]
-        )
-        candidate = SimulationEngine(
-            processes,
-            algorithm=data["algorithm"],
-            quantum=config.get("time_quantum", 4),
-            aging_interval=config.get("aging_interval", 4),
-            context_switch=config.get("context_switch_cost", 0),
-            memory_manager=memory_manager,
-            device_manager=DeviceManager(list(device_configs.values()))
-            if device_configs else None,
-            security_manager=security_manager,
-            network_manager=NetworkManager(network_settings.config)
-            if network_settings is not None and network_settings.enabled else None,
-            network_events=network_settings.events if network_settings else (),
-        )
-
+        candidate = read_workload_candidate()
         result = _simulation_response(candidate.results())
         engine = candidate
         return result
-
     except (ValueError, TypeError, KeyError, AttributeError) as error:
         return jsonify({"error": str(error)}), 400
 

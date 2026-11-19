@@ -10,9 +10,12 @@ below; Reset followed by Run reproduces them.
 
 The fixture has no Security policy and leaves the Security editor unchanged.
 The expected results below assume Security is disabled or permits both sends.
-For combined workloads with a differing enabled Security policy, apply that
-policy through the Security editor before importing; automatic policy import is
-not supported. Rejected combined imports preserve accepted inputs and results.
+Combined workloads apply an explicitly imported Security policy after complete
+candidate validation; differing policies no longer require manual editor changes.
+Rejected imports preserve accepted inputs and results. This fixture has no
+Device requests, so Device authorization introduces no additional decisions or
+timing changes. With Security enabled and both sends allowed, there are two
+Network authorization decisions; reset/replay adds two more audit decisions.
 
 Two processes submit 100-byte packets at CPU offset zero. Each has one CPU time
 unit. Links are directed, carry 100 bytes per simulated time unit, and have zero

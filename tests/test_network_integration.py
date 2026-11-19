@@ -745,7 +745,9 @@ def test_shared_offset_security_file_authorization_and_network_authorization_onc
     allow_network: bool,
 ) -> None:
     security = SecurityManager()
-    permissions = ["file:create"] + (["network:send"] if allow_network else [])
+    permissions = ["file:create", "device:read"] + (
+        ["network:send"] if allow_network else []
+    )
     security.create_role("worker", permissions)
     security.add_user("P", ["worker"])
     process = Process("P", 0, 1, file_requests={0: "CREATE /once"},
@@ -758,7 +760,7 @@ def test_shared_offset_security_file_authorization_and_network_authorization_onc
     result = engine.run()
     records = list(security.security_events)
     assert [(e["resource_type"], e["timestamp"]) for e in records] == [
-        ("file", 0), ("network", 3),
+        ("file", 0), ("device", 2), ("network", 3),
     ]
     assert process.blocked_time == (5 if allow_network else 3)
     assert process.completion_time == (6 if allow_network else 4)

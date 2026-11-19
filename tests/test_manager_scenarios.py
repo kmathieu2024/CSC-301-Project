@@ -1,4 +1,5 @@
 import pytest
+import app as simulator_api
 from playwright.sync_api import expect
 
 from tests.test_dashboard import upload_json
@@ -13,6 +14,7 @@ def load(page, url, manager):
     page.goto(url)
     tab(page, manager.title())
     page.locator("#load-" + manager + "-test").click()
+    expect(page.locator(f"#{manager}-test-status")).to_contain_text("Scenario loaded.")
 
 
 def run(page):
@@ -26,11 +28,14 @@ def run(page):
 @pytest.mark.parametrize("control", ["run", "step"])
 def test_scenario_loads_without_start_and_passes_on_completion(page, dashboard_url, manager, control):
     page.goto(dashboard_url)
+    accepted_engine = simulator_api.engine
     requests = []
     page.on("request", lambda request: requests.append(request.url) if "/api/" in request.url else None)
     tab(page, manager.title())
     page.locator("#load-" + manager + "-test").click()
-    assert requests == []
+    expect(page.locator(f"#{manager}-test-status")).to_contain_text("Scenario loaded.")
+    assert [url.rsplit("/", 1)[-1] for url in requests] == ["validate"]
+    assert simulator_api.engine is accepted_engine
     expect(page.locator(f"#{manager}-test-results")).to_be_hidden()
     expect(page.locator("#export-results-button")).to_be_disabled()
     data = page.evaluate("collectSimulationInput()")

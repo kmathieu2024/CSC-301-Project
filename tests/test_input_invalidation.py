@@ -2,6 +2,7 @@ import json
 
 import pytest
 from playwright.sync_api import expect
+import app as simulator_api
 
 from tests.test_dashboard import enter_process, upload_json
 from tests.test_memory_dashboard import memory_url, payload
@@ -37,6 +38,7 @@ def prepare_results(page, url):
 @pytest.mark.parametrize("change", ["process_remove", "process_add", "reference_edit", "reference_add", "reference_remove", "import", "scheduling", "memory"])
 def test_successful_changes_clear_all_results(page, memory_url, change):
     initial = prepare_results(page, memory_url)
+    accepted_engine = simulator_api.engine
     requests = []
     page.on("request", lambda request: requests.append(request.url) if "/api/" in request.url else None)
     if change == "process_remove":
@@ -66,7 +68,11 @@ def test_successful_changes_clear_all_results(page, memory_url, change):
     expect(page.locator("#export-results-button")).to_be_disabled()
     expect(page.locator("#step-button")).to_be_enabled()
     assert page.evaluate("resultsJson") == ""
-    assert requests == []  # Invalidation is local and never calls Reset.
+    # Import validates a disposable candidate, never starting/resetting the run.
+    assert [url.rsplit("/", 1)[-1] for url in requests] == (
+        ["validate"] if change == "import" else []
+    )
+    assert simulator_api.engine is accepted_engine
     expected_input = page.evaluate("collectSimulationInput()")
     page.get_by_role("button", name="Process Manager", exact=True).click()
     with page.expect_request("**/api/start") as request:
