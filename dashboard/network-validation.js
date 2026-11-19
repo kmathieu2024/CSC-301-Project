@@ -110,19 +110,3 @@ function validateNetworkCandidate(network, candidates = processes) {
         validateNetworkRequests(process.network_requests ?? {}, process.burst_time, validated);
     return validated;
 }
-
-function guardNetworkSecurityImport(data) {
-    // Existing Security import is intentionally not redesigned. Do not silently
-    // run an imported enabled policy under the editor's disabled/default policy.
-    if (!Object.hasOwn(data, "network") || data.security === undefined) return;
-    if (!isObject(data.security)) throw new Error("Security settings must be an object.");
-    if (data.security.enabled !== undefined && typeof data.security.enabled !== "boolean")
-        throw new Error("Security enabled must be boolean.");
-    const current = parseInputJson(document.getElementById("security-config").value);
-    if (!isObject(current)) throw new Error("Correct the Security editor before importing a combined workload.");
-    const canonical = value => Array.isArray(value) ? value.map(canonical) : isObject(value)
-        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
-    if (!current.enabled && !data.security.enabled) return;
-    if (JSON.stringify(canonical(current)) !== JSON.stringify(canonical(data.security)))
-        throw new Error("Security policy import is not supported. Apply the imported policy in Security Manager, then retry. Existing inputs and results are unchanged.");
-}

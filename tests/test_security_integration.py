@@ -2,6 +2,115 @@ from src.core.process import Process
 from src.core.simulation import SimulationEngine
 from src.managers.file import FileManager
 from src.managers.security import SecurityManager
+import pytest
+
+from src.managers.device import (
+    DeviceConfig, DeviceManager, DeviceRequestSpec, DeviceType, DiskGeometry,
+    ScanDirection, SchedulingPolicy,
+)
+
+
+@pytest.mark.parametrize("kind,operation", [
+    (DeviceType.DISK, "READ"), (DeviceType.DISK, "WRITE"),
+    (DeviceType.PRINTER, "PRINT"), (DeviceType.KEYBOARD, "READ"),
+])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_every_device_operation_is_authorized_once_before_side_effects(
+    kind: DeviceType, operation: str, allowed: bool,
+) -> None:
+    """Every supported operation uses its explicit permission and encoded ID."""
+    identity = "../a:b/%device"
+    target = "/devices/%2E%2E%2Fa%3Ab%2F%25device"
+    permission = f"device:{target}:{operation.lower()}" if allowed else "file:*"
+    security = SecurityManager()
+    security.create_role("worker", [permission])
+    security.add_user("P", ["worker"])
+    config = DeviceConfig(
+        device_id=identity, device_type=kind, policy=SchedulingPolicy.FCFS,
+        default_service_time=1,
+        disk=(DiskGeometry(min_cylinder=0, max_cylinder=9, initial_head=0,
+                           initial_direction=ScanDirection.UP,
+                           seek_time_per_cylinder=1)
+              if kind == DeviceType.DISK else None),
+    )
+    device = DeviceManager([config])
+    process = Process("P", 0, 2, device_requests={0: DeviceRequestSpec(
+        device_id=identity, operation=operation,
+        cylinder=1 if kind == DeviceType.DISK else None,
+    )})
+    engine = SimulationEngine([process], device_manager=device,
+                              security_manager=security)
+    result = engine.run()
+    records = security.security_events
+    assert len(records) == 1
+    observed = tuple(records[0][key] for key in ("resource_type", "action", "resource"))
+    assert observed == (
+        "device", operation.lower(), target,
+    )
+    assert records[0]["outcome"] == ("allowed" if allowed else "denied")
+    assert result["device_metrics"]["devices"][identity]["submitted"] == int(allowed)
+    duration = 2 if kind == DeviceType.DISK else 1
+    assert process.blocked_time == (duration if allowed else 0)
+    if not allowed:
+        assert not device.requests and not engine.event_queue
+        assert engine._device_submitted[("P", 0)] is None
+        assert next(iter(result["device_outcomes"].values()))["outcome"] == "DENIED"
+    decisions = [e for e in security.audit_log if e.get("resource_type") == "device"]
+    assert len(decisions) == 1
+
+
+@pytest.mark.parametrize("permission,allowed", [
+    ("device:*", True), ("*", True),
+    ("device:/devices/*:read", True), ("device:write", False),
+])
+def test_device_permissions_use_existing_wildcards(
+    permission: str, allowed: bool,
+) -> None:
+    from tests.test_device_integration import manager, spec
+
+    security = SecurityManager()
+    security.create_role("worker", [permission])
+    security.add_user("P", ["worker"])
+    engine = SimulationEngine([Process("P", 0, 1, device_requests={0: spec()})],
+                              device_manager=manager(service=1),
+                              security_manager=security)
+    assert engine.run()["device_metrics"]["devices"]["d0"]["submitted"] == int(allowed)
+    assert len(security.security_events) == 1
+
+
+@pytest.mark.parametrize("boundary", ["authorize", "submit"])
+def test_device_security_failure_keeps_reset_required_contract(
+    monkeypatch, boundary: str,
+) -> None:
+    from src.core.simulation import SimulationExecutionError
+    from tests.test_device_integration import manager, spec
+
+    security = SecurityManager()
+    security.create_role("worker", ["device:read"])
+    security.add_user("P", ["worker"])
+    device = manager(service=1)
+    process = Process("P", 0, 1, device_requests={0: spec()})
+    engine = SimulationEngine([process], device_manager=device,
+                              security_manager=security)
+    owner, method = ((security, "authorize") if boundary == "authorize"
+                     else (device, "submit_request"))
+    original = getattr(owner, method)
+    failure = RuntimeError("injected " + boundary)
+
+    def fail(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(owner, method, fail)
+    with pytest.raises(SimulationExecutionError) as caught:
+        engine.run()
+    assert caught.value.__cause__ is failure
+    assert not device.requests and process.blocked_time == 0
+    assert not engine._device_waiting
+    with pytest.raises(SimulationExecutionError):
+        engine.step()
+    monkeypatch.setattr(owner, method, original)
+    engine.reset()
+    assert engine.run()["device_metrics"]["devices"]["d0"]["completed"] == 1
 
 
 def test_security_manager_authorizes_file_requests_and_exposes_events():

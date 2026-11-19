@@ -261,12 +261,13 @@ networkField("network-event-action").onchange = updateNetworkEventTarget;
 networkField("load-network-demo").onclick = async () => {
     if (busy || networkDemoLoading) return;
     networkDemoLoading = true; networkField("load-network-demo").disabled = true;
+    const generation = ++workloadImportGeneration;
     try {
         const response = await fetch("network-demo.json");
         if (!response.ok) throw new Error("Could not load network demonstration.");
         const data = parseInputJson(await response.text());
         if (busy) throw new Error("Pause before replacing the workload.");
-        loadWorkload(data);
+        await loadWorkload(data, generation);
         networkField("network-demo-status").textContent = "Loaded the network failure scenario. Use Process Manager Run or Step. Current Security settings are unchanged.";
     } catch (error) { networkField("network-demo-status").textContent = error.message; }
     finally { networkDemoLoading = false; networkField("load-network-demo").disabled = busy; }

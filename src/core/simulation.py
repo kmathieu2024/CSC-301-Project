@@ -152,7 +152,7 @@ class SimulationEngine:
             self.security_manager.set_context(0, self.scenario_id)
         else:
             self._security_event_cursor = 0
-        self._device_submitted: dict[tuple[str, float], str] = {}
+        self._device_submitted: dict[tuple[str, float], str | None] = {}
         self._device_waiting: dict[str, tuple[Process, float]] = {}
         self._device_outcomes: dict[str, dict[str, Any]] = {}
         self._device_submission_id: str | None = None
@@ -433,9 +433,34 @@ class SimulationEngine:
 
     def _submit_device_request(
         self, process: Process, key: tuple[str, float],
-    ) -> None:
-        """Submit once, block until a matching terminal interrupt, and release CPU."""
+    ) -> bool:
+        """Authorize once before submission; return whether this request blocks."""
         spec = process.device_requests[key[1]]
+        if self.security_manager is not None:
+            # Validation accepts exactly these operations; future operations
+            # must acquire an explicit permission mapping before integration.
+            actions = {"READ": "read", "WRITE": "write", "PRINT": "print"}
+            action = actions[spec.operation]
+            target = "/devices/" + quote(spec.device_id, safe="").replace(".", "%2E")
+            self.security_manager.set_context(self.current_time, self.scenario_id)
+            try:
+                allowed = self.security_manager.authorize(
+                    process.pid, action, target, resource="device",
+                )
+            finally:
+                self._sync_security_events()
+            if not allowed:
+                self._device_submitted[key] = None
+                self._device_outcomes[f"denied:{process.pid}:{key[1]}"] = {
+                    "request_id": None, "pid": process.pid, "device_id": spec.device_id,
+                    "request_offset": key[1], "timestamp": self.current_time,
+                    "outcome": "DENIED", "reason": "ACCESS_DENIED",
+                }
+                self.log(process, "device_denied", "device_request", process.state)
+                self.events[-1].update({
+                    "outcome": "denied", "message": "ACCESS_DENIED",
+                })
+                return False
         old_state = process.state
         blocked_time = process.blocked_time
         request_id = None
@@ -484,6 +509,7 @@ class SimulationEngine:
             raise
         finally:
             self._device_submission_id = previous_submission
+        return True
 
     @staticmethod
     def _network_target(source: str, destination: str) -> str:
@@ -1055,8 +1081,8 @@ class SimulationEngine:
 
                 if (executed in process.device_requests
                         and key not in self._device_submitted):
-                    self._submit_device_request(process, key)
-                    break
+                    if self._submit_device_request(process, key):
+                        break
                 if (executed in process.network_requests
                         and key not in self._network_submitted):
                     if self._submit_network_request(process, key):

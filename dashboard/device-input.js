@@ -184,13 +184,14 @@ for (const [button, form, error, update] of [
 deviceField("load-device-demo").onclick = async () => {
     if (busy || deviceDemoLoading) return;
     deviceDemoLoading = true;
+    const generation = ++workloadImportGeneration;
     deviceField("load-device-demo").disabled = true;
     try {
         const response = await fetch("device-demo.json");
         if (!response.ok) throw new Error("Could not load device demonstration.");
         const data = parseInputJson(await response.text());
         if (busy) throw new Error("Pause the simulation before replacing its workload.");
-        loadWorkload(data);
+        await loadWorkload(data, generation);
         deviceField("device-demo-status").textContent = "Loaded 3 devices and 12 requests. Use Run or Step in Process Manager.";
     } catch (error) { deviceField("device-demo-status").textContent = error.message; }
     finally { deviceDemoLoading = false; deviceField("load-device-demo").disabled = busy; }

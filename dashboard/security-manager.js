@@ -1,3 +1,19 @@
+// Prepare detached input only; the shared backend validates roles and permissions.
+function prepareSecurityImport(data) {
+    const explicit = Object.hasOwn(data, "security");
+    const editor = document.getElementById("security-config");
+    const value = explicit ? (data.security === null ? {enabled: false} : data.security)
+        : parseInputJson(editor.value);
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("Security configuration must be a JSON object.");
+    return {value, explicit, text: explicit ? JSON.stringify(value, null, 2) : editor.value};
+}
+
+function applySecurityImport(candidate) {
+    if (candidate.explicit) document.getElementById("security-config").value = candidate.text;
+    document.getElementById("security-config-error").textContent = "";
+}
+
 // Render Security Manager data returned in each simulation snapshot.
 function renderSecurityManager(results) {
     const status = document.getElementById("security-status");
@@ -8,7 +24,7 @@ function renderSecurityManager(results) {
 
     status.textContent = results.security_enabled
         ? "Security is enabled. Access is deny-by-default."
-        : "Security is disabled. File Manager uses its backward-compatible allow-all policy.";
+        : "Security is disabled. File, Device, and Network requests retain legacy behavior.";
 
     function renderRows(body, records, columns, emptyMessage) {
         body.replaceChildren();

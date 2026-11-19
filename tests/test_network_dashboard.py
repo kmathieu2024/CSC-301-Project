@@ -323,7 +323,7 @@ def test_rejected_import_is_atomic_including_filters_drafts_and_export(
     expect(page.locator("#export-results-button")).to_be_enabled()
 
 
-def test_combined_six_managers_keep_manual_security_policy(
+def test_combined_six_managers_apply_imported_security_policy(
     page: Page, network_url: str,
 ) -> None:
     page.goto(network_url)
@@ -333,31 +333,26 @@ def test_combined_six_managers_keep_manual_security_policy(
     data["memory"] = {"enabled": True, "frame_count": 1, "page_size": 4,
                       "fault_latency": 1}
     policy = {"enabled": True, "roles": [{"name": "worker",
-              "permissions": ["network:send", "file:create"]}],
+              "permissions": ["network:send", "file:create", "device:read"]}],
               "users": [{"username": "P", "roles": ["worker"]}]}
     data["security"] = policy
     data["processes"][0].update(file_requests={"0": "CREATE /once"},
         blocking_requests={"0": 1}, memory_references={"0": 0},
         device_requests={"0": {"device_id": "keyboard", "operation": "READ"}})
-    tab(page, "Process")
-    upload_json(page, data)
-    expect(page.locator("#process-error")).to_contain_text("Security policy import")
-    assert page.evaluate("processes.length") == 0
-    tab(page, "Security")
-    page.locator("#security-config").fill(json.dumps(policy))
+    assert not json.loads(page.locator("#security-config").input_value())["enabled"]
     load(page, data)
     result = run(page)
     assert result["security_enabled"] is True
     assert result["current_time"] == 6
     assert result["processes"][0]["blocked_time"] == 5
     assert [(e["resource_type"], e["outcome"]) for e in result["security_events"]] == [
-        ("file", "allowed"), ("network", "allowed"),
+        ("file", "allowed"), ("device", "allowed"), ("network", "allowed"),
     ]
     assert result["device_metrics"]["devices"]["keyboard"]["submitted"] == 1
     assert result["memory_metrics"]["references"] == 1
     tab(page, "Network")
     expect(page.locator("#network-outcomes-body")).to_contain_text("DELIVERED")
-    assert page.locator("#security-config").input_value() == json.dumps(policy)
+    assert json.loads(page.locator("#security-config").input_value()) == policy
 
 
 def test_null_metrics_never_coerce_to_zero_or_percent_suffix(
@@ -455,7 +450,7 @@ def test_edit_imported_request_defaults_and_process_changes_preserve_drafts(
     assert page.locator("#network-request-pid").is_enabled()
 
 
-def test_security_import_guard_preserves_existing_results_and_policy(
+def test_invalid_security_import_preserves_existing_results_and_policy(
     page: Page, network_url: str,
 ) -> None:
     page.goto(network_url)
@@ -463,10 +458,13 @@ def test_security_import_guard_preserves_existing_results_and_policy(
     result = run(page)
     policy = page.locator("#security-config").input_value()
     data = workload()
-    data["security"] = {"enabled": True, "roles": [], "users": []}
+    data["security"] = {"enabled": True, "roles": [],
+                        "users": [{"username": "P", "roles": ["missing"]}]}
     tab(page, "Process")
     upload_json(page, data)
-    expect(page.locator("#process-error")).to_contain_text("Apply the imported policy")
+    expect(page.locator("#process-error")).to_contain_text(
+        "Every assigned role must already exist",
+    )
     assert page.evaluate("JSON.parse(resultsJson)") == result
     assert page.locator("#security-config").input_value() == policy
     expect(page.locator("#export-results-button")).to_be_enabled()

@@ -1353,6 +1353,64 @@ to preserve existing simulation workloads. See
 details, and examples. This is an instructional RBAC simulation, not a production
 authentication or security system.
 
+### Cross-manager authorization and atomic imports
+
+Enabled Security protects File, Device, and Network requests using the same
+SecurityManager. Each process PID is its username; omitted process users are
+registered without roles and denied protected requests. Existing wildcards and
+scoped permissions apply without a separate permission system.
+
+| Device | Operation | Required permission |
+|---|---|---|
+| Disk | READ | `device:read` |
+| Disk | WRITE | `device:write` |
+| Printer | PRINT | `device:print` |
+| Keyboard | READ | `device:read` |
+
+Device targets are `/devices/<percent-encoded-device-id>`, including encoded
+slashes and dots. A scoped example is `device:/devices/keyboard:read`;
+`device:*` and `*` also work. The engine authorizes once before creating a Device
+request or blocking. Denial creates an engine-level `device_outcomes` DENIED
+record with `request_id: null`, an alert, and an audit decision, but no Device
+queue entry, callback, or blocked time. Other requests at that CPU offset can
+still execute. DeviceManager scheduling and notification behavior are unchanged.
+Security-enabled workloads that use devices must now grant the corresponding
+permissions; disabled workloads retain their behavior.
+
+Workload imports explicitly containing `security` apply that policy to the
+Security editor, including `enabled: false`. If Security is omitted, the current
+editor policy is retained for legacy and demonstration compatibility. An explicit
+`security: null` uses the existing disabled-policy behavior and is displayed as
+`{"enabled": false}`. Unused roles/users in disabled policies remain unvalidated,
+as before. Imports still require the normal workload format; bare policy
+documents are not supported.
+
+The dashboard parses and validates the full detached candidate before replacing
+any accepted configuration. Imports require the Flask-served dashboard; static
+`file://` previews cannot perform authoritative backend validation.
+`POST /api/validate` shares candidate construction
+with `/api/start` and returns `{"valid": true, "security_enabled": true}` for an
+enabled valid policy (false when disabled). Invalid input returns HTTP 400 with
+`code: "invalid_workload"` and an explanatory `error`. Validation never replaces
+the accepted engine or advances it, delivers callbacks, reads its results, or
+changes its audit history. Only Start accepts a new engine after validation.
+
+Rejected imports preserve inputs, editor drafts, results, exports, filters, and
+execution state. A generation counter rejects stale responses after newer
+imports, editor changes, or simulation activity. Editor Edit/Cancel/Clear actions
+and draft submissions also invalidate pending imports; ordinary navigation and
+read-only interactions do not. A validated import's own field resets preserve
+its generation. Only a current upload updates status/errors, and file cleanup
+checks the captured File identity, including when filenames match. Uploads and
+built-in scenarios await validation before applying state. A successful import
+accepts dashboard
+inputs; Run/Step subsequently uses the existing Start workflow to create the run.
+Reset retains audit history; replay adds one new decision per protected request.
+For the combined shared-offset File/Memory/Device/Network regression, the three
+allowed decisions occur for File at 0, Device at 2, and Network at 3. Final time
+6 and blocked time 5 are unchanged when `device:read` is granted. DM-A07 remains
+separately deferred.
+
 
 ## Network Manager
 
@@ -1485,11 +1543,10 @@ target `/nodes/<encoded-source>/to/<encoded-destination>`, for example
 without creating a packet or blocking the process. Security-disabled workloads
 retain their existing behavior.
 
-The dashboard does not automatically import a differing Security policy.
-Apply that policy through the Security editor before importing a combined
-workload. A mismatched enabled policy is rejected before replacing accepted
-inputs or results. A Network-only import leaves the current Security settings
-unchanged; those settings can affect a demonstration's outcomes.
+The dashboard applies an explicitly imported Security policy after validating
+the complete workload, even when it differs from the editor's current policy.
+If an import omits Security, the editor is retained; those settings can affect a
+demonstration's outcomes. Invalid imports preserve accepted inputs and results.
 
 Standalone callers use `NetworkManager` configuration, submission, scheduling,
 completion, cancellation, failure/recovery, snapshot, metrics, validation, and

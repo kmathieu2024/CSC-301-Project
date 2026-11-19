@@ -36,6 +36,64 @@ updateConfigurationFields();
 
 // Store the processes entered by the user.
 const processes = [];
+let workloadImportGeneration = 0;
+
+function invalidateWorkloadImports() {
+    workloadImportGeneration += 1;
+}
+
+const workloadEditorFields = [
+    '#process input', '#process select',
+    '#file-request-form input', '#file-request-form textarea', '#file-request-form select',
+    '#memory-enabled', '#memory-policy', '#memory-frame-count', '#memory-page-size',
+    '#memory-fault-latency', '#reference-form input', '#reference-form select',
+    '#device form input', '#device form select', '#network form input',
+    '#network form select', '#security-config'
+].join(", ");
+// Draft edits count too. Result filters and independent comparisons do not edit
+// the workload, so they must not invalidate an otherwise current import.
+for (const type of ["input", "change"]) document.addEventListener(type, event => {
+    if (event.target.matches(workloadEditorFields)) invalidateWorkloadImports();
+}, true);
+
+// These actions populate/reset drafts without input/change events. Accepted
+// Save/Remove actions already invalidate through inputChanged; navigation and
+// read-only controls are deliberately excluded. Programmatic import resets do
+// not emit clicks, so they cannot invalidate their own validated transaction.
+const editorDraftActions = [
+    '#file-request-table-body button[aria-label^="Edit "]',
+    '#reference-table-body button[aria-label^="Edit "]',
+    '#network table button[aria-label^="Edit "]',
+    '#device-config-body button[aria-label^="Edit "]',
+    '#device-input-body button[aria-label^="Edit "]',
+    '#file-request-cancel', '#reference-cancel',
+    '#device-clear-draft', '#device-request-clear-draft',
+    '#network form button[id$="-clear"]',
+    '#process-form button[type="reset"]', '#file-request-form button[type="reset"]',
+    '#reference-form button[type="reset"]', '#device form button[type="reset"]',
+    '#network form button[type="reset"]'
+].join(", ");
+document.addEventListener("click", event => {
+    const action = event.target.closest(editorDraftActions);
+    if (action && !action.disabled && !busy) invalidateWorkloadImports();
+}, true);
+
+// Failed submissions also change draft validation/editing state. Successful
+// submissions already call inputChanged, so only invalidate if they did not.
+const editorForms = "#process-form, #reference-form, #file-request-form, #device form, #network form";
+const editorSubmissionGenerations = new WeakMap();
+document.addEventListener("submit", event => {
+    if (busy || !event.target.matches(editorForms)) return;
+    editorSubmissionGenerations.set(event, workloadImportGeneration);
+}, true);
+document.addEventListener("submit", event => {
+    // Observe after the editor's handler, without relying on microtask timing
+    // between capture and target listeners. This is event identity, not a clock.
+    const generation = editorSubmissionGenerations.get(event);
+    if (generation !== undefined && generation === workloadImportGeneration)
+        invalidateWorkloadImports();
+    editorSubmissionGenerations.delete(event);
+});
 
 const processForm = document.getElementById("process-form");
 const processError = document.getElementById("process-error");
@@ -173,13 +231,17 @@ function renderProcessTable() {
 const processFileInput = document.getElementById("process-file");
 const uploadStatus = document.getElementById("upload-status");
 
-function loadWorkload(data) {
+async function loadWorkload(data, generation = ++workloadImportGeneration) {
+    if (generation !== workloadImportGeneration)
+        throw new Error("Import superseded by newer inputs or simulation activity. Retry the import.");
+    if (busy || running) throw new Error("Pause before importing a workload.");
     const validAlgorithms = ["FCFS", "SJF", "SRTF", "RR", "PRIORITY"];
 
     if (data === null || typeof data !== "object" ||
         Array.isArray(data)) {
         throw new Error("The file must contain a JSON object.");
     }
+    data = structuredClone(data);
 
     if (!validAlgorithms.includes(data.algorithm)) {
         throw new Error(
@@ -295,9 +357,23 @@ function loadWorkload(data) {
     if (!importedMemory.enabled && uploadedProcesses.some(p => Object.keys(p.memory_references).length))
         throw new Error("Enable memory simulation or remove memory references before importing.");
     validateNetworkCandidate(importedNetwork, uploadedProcesses);
-    guardNetworkSecurityImport(data);
-    // File reading is asynchronous: do not replace inputs if Run began meanwhile.
-    if (busy) throw new Error("Wait for the simulation to pause before importing.");
+    const security = prepareSecurityImport(data);
+    const configuration = {...importedConfiguration};
+    for (const [key, id, minimum] of [["context_switch_cost", "context-switch-cost", 0],
+        ...(data.algorithm === "RR" ? [["time_quantum", "time-quantum", 1]] : []),
+        ...(data.algorithm === "PRIORITY" ? [["aging_interval", "aging-interval", 1]] : [])]) {
+        if (configuration[key] === undefined) configuration[key] = readWholeNumber(id, key, minimum);
+    }
+    if (location.protocol === "file:")
+        throw new Error("Open the dashboard through Flask (http://127.0.0.1:5000/) to validate imported workloads.");
+    await sendRequest("validate", {
+        ...data, processes: uploadedProcesses, configuration,
+        memory: importedMemory, devices: importedDevices,
+        ...(importedNetwork ? {network: importedNetwork} : {}),
+        security: security.value,
+    });
+    if (generation !== workloadImportGeneration || busy || running)
+        throw new Error("Import superseded by newer inputs or simulation activity. Retry the import.");
     // Update the dashboard only after every process passes validation.
     // Clear Add drafts too: they have no fileRequestEdit object for redraw cleanup.
     cancelFileRequestEdit();
@@ -305,6 +381,7 @@ function loadWorkload(data) {
     clearDeviceDrafts();
     applyMemoryConfiguration(importedMemory);
     applyNetworkConfiguration(importedNetwork);
+    applySecurityImport(security);
     if (importedConfiguration) {
         for (const [key, id] of [["context_switch_cost", "context-switch-cost"], ["time_quantum", "time-quantum"], ["aging_interval", "aging-interval"]]) {
             if (importedConfiguration[key] !== undefined) document.getElementById(id).value = importedConfiguration[key];
@@ -319,7 +396,8 @@ function loadWorkload(data) {
     algorithmSelect.value = data.algorithm;
     updateConfigurationFields();
     renderProcessTable();
-    inputChanged();
+    // This validated import still owns its generation through caller feedback.
+    inputChanged(false);
 
 }
 
@@ -332,25 +410,29 @@ processFileInput.addEventListener("change", async function () {
 
     processError.textContent = "";
     uploadStatus.textContent = "";
+    const generation = ++workloadImportGeneration;
 
     try {
         // Reading a file takes time, so await waits for its text.
         const fileText = await file.text();
         const data = parseInputJson(fileText);
 
-        loadWorkload(data);
+        await loadWorkload(data, generation);
 
+        if (generation !== workloadImportGeneration) return;
         uploadStatus.textContent =
             "Loaded " + processes.length + " processes from " + file.name + ".";
     } catch (error) {
+        if (generation !== workloadImportGeneration) return;
         if (error instanceof SyntaxError) {
             processError.textContent = "The file contains invalid JSON.";
         } else {
             processError.textContent = "Upload failed: " + error.message;
         }
     } finally {
-        // Allow selecting the same file again after correcting it.
-        processFileInput.value = "";
+        // Only clear the exact selection this invocation owns. A superseded
+        // request must not clear a newer file, even if its name is identical.
+        if (processFileInput.files[0] === file) processFileInput.value = "";
     }
 });
 
@@ -417,7 +499,7 @@ function collectSecurityConfiguration() {
     const text = document.getElementById("security-config").value;
     let configuration;
     try {
-        configuration = JSON.parse(text);
+        configuration = parseInputJson(text);
     } catch (error) {
         document.getElementById("security-config-error").textContent =
             "Security configuration must contain valid JSON.";
@@ -462,7 +544,8 @@ const initialResultDisplays = Array.from(document.querySelectorAll(
     "#security-status, #security-users-body, #security-roles-body, #security-events-body, #security-audit-body"
 ), element => ({element, initial: element.cloneNode(true)}));
 
-function inputChanged() {
+function inputChanged(invalidateImport = true) {
+    if (invalidateImport !== false) invalidateWorkloadImports();
     clearDeviceResults();
     clearNetworkResults();
     clearManagerTestMode();
@@ -612,6 +695,7 @@ function exportResults() {
 
 // Start the simulation if needed.
 async function startSimulation() {
+    invalidateWorkloadImports();
     if (!validateNetworkDrafts()) {
         showPage("network", document.querySelector("button[onclick*=\"'network'\"]"));
         document.querySelector('#network .field-error:not(:empty)')?.focus();
@@ -723,6 +807,7 @@ async function runSimulation() {
 
 // Pause the simulation.
 function pauseSimulation() {
+    invalidateWorkloadImports();
     running = false;
     simulationStatus.textContent += " | Paused";
 }
@@ -730,6 +815,7 @@ function pauseSimulation() {
 
 // Reset the simulation.
 async function resetSimulation() {
+    invalidateWorkloadImports();
     if (busy) {
         running = false;
         return;

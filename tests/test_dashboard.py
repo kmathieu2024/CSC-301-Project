@@ -142,9 +142,8 @@ def test_upload_rejects_invalid_priority(page: Page, invalid_priority):
     expect(page.locator("#upload-status")).to_be_empty()
 
 
-def test_upload_defaults_missing_priority_to_one(page: Page):
-    dashboard = ROOT / "dashboard" / "index.html"
-    page.goto(dashboard.as_uri())
+def test_upload_defaults_missing_priority_to_one(page: Page, m3_dashboard_url):
+    page.goto(m3_dashboard_url)
     page.get_by_role("button", name="Process Manager", exact=True).click()
 
     data = {
@@ -178,9 +177,9 @@ def test_upload_defaults_missing_priority_to_one(page: Page):
         ["P1", "0", "4", "1", "Remove"]
     )
 
-def open_process_dashboard(page: Page):
+def open_process_dashboard(page: Page, url=None):
     dashboard = ROOT / "dashboard" / "index.html"
-    page.goto(dashboard.as_uri())
+    page.goto(url or dashboard.as_uri())
     page.get_by_role("button", name="Process Manager", exact=True).click()
 
 
@@ -198,6 +197,9 @@ def upload_json(page: Page, data):
         "mimeType": "application/json",
         "buffer": json.dumps(data).encode("utf-8"),
     })
+    # Wait for async candidate validation, including rejected imports.
+    # The handler clears this control only after the import finishes.
+    expect(page.locator("#process-file")).to_have_value("")
 
 @pytest.mark.parametrize("algorithm", ["FCFS", "SJF", "SRTF", "RR", "PRIORITY"])
 def test_algorithm_shows_relevant_configuration(page: Page, algorithm):
@@ -341,8 +343,8 @@ def test_remove_processes_restores_empty_table(page: Page):
         "No processes added yet."
     )
 
-def test_valid_upload_replaces_existing_processes(page: Page):
-    open_process_dashboard(page)
+def test_valid_upload_replaces_existing_processes(page: Page, m3_dashboard_url):
+    open_process_dashboard(page, m3_dashboard_url)
     enter_process(page, pid="Existing")
 
     data = {

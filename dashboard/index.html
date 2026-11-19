@@ -665,7 +665,8 @@
   ]
 }</textarea>
                 <p id="security-config-error" class="field-error" role="alert"></p>
-                <p><strong>Permission examples:</strong> <code>file:read</code>, <code>file:write</code>, <code>file:*</code>, <code>*</code>, and path-scoped rules such as <code>file:/private/*:read</code>.</p>
+                <p><strong>Permission examples:</strong> <code>file:read</code>, <code>device:read</code>, <code>device:write</code>, <code>device:print</code>, <code>network:send</code>, resource wildcards such as <code>device:*</code>, and <code>*</code>. Scoped examples: <code>file:/private/*:read</code> and <code>device:/devices/keyboard:read</code>.</p>
+                <p>Workload import validates every manager before applying inputs. An explicit Security policy replaces this editor, including enabled: false. If Security is omitted, this editor is retained. Disabled policies keep unused roles/users without validating them. Bare policy documents are not workload imports.</p>
             </section>
 
             <section class="card">
@@ -779,7 +780,7 @@
                 <h2>Network settings</h2>
                 <button id="load-network-demo" type="button" class="memory-secondary">Load network failure demonstration</button>
                 <p id="network-demo-status" role="status"></p>
-                <p>Combined imports keep the Security editor's policy. Apply a differing enabled policy in Security Manager before importing it.</p>
+                <p>Combined imports apply their explicit Security policy after complete candidate validation. Imports that omit Security retain the editor's current policy.</p>
                 <form id="network-settings-form" novalidate aria-describedby="network-settings-error">
                     <label><input id="network-enabled" type="checkbox"> Enable networking</label>
                     <label for="network-hop-limit">Network hop limit</label><input id="network-hop-limit" type="number" min="1" step="1" value="16">
