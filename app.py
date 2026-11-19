@@ -6,6 +6,7 @@ from typing import Any
 from flask import Flask, Response, request, jsonify, send_from_directory
 
 from src.core.process import Process
+from src.parallel.parallel import compare_core_counts
 from src.core.simulation import SimulationEngine, SimulationExecutionError
 from src.managers.memory.memory_manager import MemoryManager
 from src.managers.device import DeviceManager
@@ -290,7 +291,18 @@ def start():
     except (ValueError, TypeError, KeyError, AttributeError) as error:
         return jsonify({"error": str(error)}), 400
 
-
+@app.route("/api/parallel/compare", methods=["POST"])
+def compare_parallel():
+    """Compare 1-, 2-, and 4-core execution using a separate simulation."""
+    try:
+        candidate = read_workload_candidate()
+        comparisons = compare_core_counts(candidate.processes)
+        return _simulation_response({"comparisons": comparisons})
+    except (ValueError, TypeError, KeyError, AttributeError) as error:
+        return jsonify({
+            "error": str(error),
+            "code": "invalid_parallel_workload"
+        }), 400
 @app.route("/api/memory/compare", methods=["POST"])
 def compare_memory():
     """Compare fresh FIFO/LRU managers; fault_rate is a fraction from 0 to 1."""
