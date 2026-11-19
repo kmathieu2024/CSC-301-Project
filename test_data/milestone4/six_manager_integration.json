@@ -1,0 +1,85 @@
+
+{
+  "algorithm": "FCFS",
+  "configuration": {
+    "context_switch_cost": 0
+  },
+  "memory": {
+    "enabled": true,
+    "frame_count": 1,
+    "page_size": 4,
+    "algorithm": "fifo",
+    "fault_latency": 1
+  },
+  "devices": [
+    {
+      "device_id": "keyboard",
+      "device_type": "KEYBOARD",
+      "default_service_time": 1
+    }
+  ],
+  "network": {
+    "nodes": [
+      {"node_id": "a"},
+      {"node_id": "b"}
+    ],
+    "links": [
+      {
+        "link_id": "ab",
+        "source": "a",
+        "destination": "b",
+        "bandwidth_bytes_per_time_unit": 100,
+        "propagation_delay": 1,
+        "queue_capacity_packets": 4
+      }
+    ]
+  },
+  "security": {
+    "enabled": true,
+    "roles": [
+      {
+        "name": "worker",
+        "permissions": [
+          "file:create",
+          "device:read",
+          "network:send"
+        ]
+      }
+    ],
+    "users": [
+      {
+        "username": "P",
+        "roles": ["worker"]
+      }
+    ]
+  },
+  "processes": [
+    {
+      "pid": "P",
+      "arrival_time": 0,
+      "burst_time": 1,
+      "file_requests": {
+        "0": "CREATE /once"
+      },
+      "blocking_requests": {
+        "0": 1
+      },
+      "memory_references": {
+        "0": 0
+      },
+      "device_requests": {
+        "0": {
+          "device_id": "keyboard",
+          "operation": "READ"
+        }
+      },
+      "network_requests": {
+        "0": {
+          "source": "a",
+          "destination": "b",
+          "size_bytes": 100
+        }
+      }
+    }
+  ]
+}
