@@ -28,11 +28,14 @@ parallelButton.addEventListener("click", async () => {
             const row = document.createElement("tr");
 
             const values = [
-                cores,
-                result.makespan,
-                result.speedup.toFixed(2) + "x",
-                result.efficiency.toFixed(2) + "%",
-                result.throughput.toFixed(3)
+                    cores,
+                    result.makespan,
+                    result.speedup.toFixed(2) + "x",
+                    result.efficiency.toFixed(2) + "%",
+                    result.throughput.toFixed(3),
+                    result.core_utilization
+                        .map(value => value.toFixed(1) + "%")
+                        .join(", ")
             ];
 
             for (const value of values) {

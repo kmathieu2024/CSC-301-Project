@@ -843,30 +843,39 @@ Run the parallel computing tests:
 python -m pytest -q test_parallel.py
 ```
 
+
 #### Parallel Computing Status
 
-The current parallel simulator supports FCFS execution
-across 1, 2, and 4 simulated CPU cores.
+The Parallel Computing module supports FCFS execution across
+1, 2, and 4 simulated CPU cores.
 
-The implementation provides:
-- Core assignment and execution timelines.
-- Makespan calculations.
-- Speedup and efficiency comparisons.
-- Throughput measurements.
-- Individual core utilization.
-- Deterministic race-condition demonstrations.
-- Synchronization and deadlock examples.
+The Flask endpoint `/api/parallel/compare` connects the
+original `ParallelSimulator` to the dashboard, allowing
+users to compare:
 
-The parallel simulator is currently a separate backend
-module and is not integrated into the main dashboard.
+- Makespan
+- Speedup
+- Efficiency
+- Throughput
+- Per-core utilization
 
-The synchronization examples demonstrate expected
-behavior using deterministic operations rather than
-actual multithreaded execution.
+The `TaskParallelSimulator` additionally supports:
 
-Future development will focus on expanding parallel
-execution capabilities and integrating performance
-comparisons into the dashboard.
+- Global and partitioned multicore scheduling
+- Task dependencies and circular dependency validation
+- Mutex and semaphore synchronization
+- Task blocking, wakeups, and synchronization events
+- Per-core execution timelines
+
+The synchronization module also includes race-condition
+demonstrations and wait-for-graph deadlock detection.
+
+The advanced task scheduling and synchronization features
+are implemented and tested in the backend but are not yet
+exposed through the dashboard.
+
+Automated tests cover the parallel scheduler and
+synchronization features.
 
 
 ### Dashboard Development Status
@@ -894,9 +903,12 @@ The Device Manager workspace includes configuration, request editing,
 device status, histories, timelines, and performance metrics.
 See Device Manager inputs and execution below.
 
-The Security and Network workspaces now expose their implemented configuration
-and results. The Parallel Computing, Scenario Builder, Testing Center, and
-Results pages still require further implementation.
+The Security and Network workspaces expose their implemented configuration and results.
+
+The Parallel Computing dashboard supports FCFS performance
+comparisons across 1, 2, and 4 CPU cores. Advanced task scheduling and synchronization remain backend-only.
+
+The Scenario Builder, Testing Center, and Results pages still require further implementation.
 
 ### Port 5000 Troubleshooting
 

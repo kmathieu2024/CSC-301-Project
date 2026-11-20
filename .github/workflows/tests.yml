@@ -30,4 +30,4 @@ jobs:
           sleep 3
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ test_parallel.py -v
