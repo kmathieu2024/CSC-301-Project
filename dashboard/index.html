@@ -859,7 +859,37 @@
 
         <div id="parallel" class="page">
             <h1>Parallel Computing</h1>
-            <p>Parallel computing prototype.</p>
+            <p>Compare the current workload across 1, 2, and 4 CPU cores.</p>
+            <section class="card">
+                <h2>Multicore Performance Comparison</h2>
+                <p>This comparison uses the standalone FCFS parallel simulator.</p>
+
+                <button type="button" id="parallel-compare-button">
+                    Compare 1, 2, and 4 Cores
+                </button>
+
+                 <p id="parallel-status" role="status"></p>
+
+                <div class="table-container">
+                    <table class="process-table">
+                        <thead>
+                            <tr>
+                                <th>Cores</th>
+                                <th>Makespan</th>
+                                <th>Speedup</th>
+                                <th>Efficiency</th>
+                                <th>Throughput</th>
+                                <th>Core Utilization</th>
+                            </tr>
+                        </thead>
+                        <tbody id="parallel-results-body">
+                            <tr>
+                                <td colspan="6">Run a comparison to see results.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         </div>
 
         <div id="scenario" class="page">
@@ -894,6 +924,6 @@
     <script src="device-input.js"></script>
     <script src="network-input.js"></script>
     <script src="security-manager.js"></script>
-
+    <script src="parallel-results.js"></script>
 </body>
 </html>
