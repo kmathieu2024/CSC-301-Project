@@ -27,7 +27,9 @@ compare results before aggregating.
   `test_data/milestone3/trace_stress.txt` with 4,096-byte pages and
   10 time units per modeled fault. Start with empty frames for each policy.
 
-Use the checked-in [device expected results](../test_data/expected_results/device_expected.md)
-to verify the starting disk fixture. For a separate memory sanity check, replay
+Use `test_completed_reference_execution` in
+[`tests/test_device_manager.py`](../tests/test_device_manager.py) to verify the
+three-request disk case. Expected head movement is 100 cylinders for FCFS, 70
+for SSTF, and 128 for SCAN. For a separate memory sanity check, replay
 the short `test_data/trace.txt` fixture with the page and frame settings in the
 [memory expected results](../test_data/expected_results/memory_expected.md).
