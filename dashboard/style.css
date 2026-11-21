@@ -55,6 +55,11 @@ body {
     background: #7d76b6;
 }
 
+.sidebar .nav:focus-visible {
+    outline: 3px solid white;
+    outline-offset: -3px;
+}
+
 .nav.section {
     margin-top: 20px;
 }
@@ -210,7 +215,7 @@ body {
     gap: 12px;
 }
 
-.control-buttons button {
+.control-buttons button:not(.primary) {
     padding: 10px 20px;
     border: none;
     border-radius: 6px;
@@ -443,6 +448,7 @@ input[aria-invalid="true"] {
     accent-color: #6c55f7;
 }
 
+#algorithm,
 #memory .process-fields select {
     width: 100%;
     padding: 10px;
@@ -541,15 +547,19 @@ input[aria-invalid="true"] {
 
 
 .manager-test-controls { margin-bottom: 24px; }
+.manager-test-controls .primary { margin-top: 0; }
 .manager-test-controls .test-pass { color: #166534; font-weight: bold; }
 .manager-test-controls .test-fail { color: #b42318; font-weight: bold; }
 
 /* Device workspace uses existing cards, tables, controls, and state badges. */
 #device .card + .card { margin-top: 24px; }
-#device select, #device input[type="search"] {
+#device select, #device input[type="search"],
+#network input:not([type="checkbox"]), #network select {
     padding: 10px; border: 1px solid #b8bdcc; border-radius: 6px;
-    width: 100%; font: inherit;
+    width: 100%;
 }
+#device select, #device input[type="search"],
+#network select, #network input[type="search"] { font: inherit; }
 #device fieldset { border: 1px solid #d4d2df; border-radius: 8px; margin: 20px 0; }
 #device .field-error { color: #b42318; }
 #device button:focus-visible, #device input:focus-visible, #device select:focus-visible {
@@ -557,8 +567,13 @@ input[aria-invalid="true"] {
 }
 #device button:disabled { opacity: .6; cursor: not-allowed; }
 .device-history { max-height: 450px; overflow: auto; }
-#device table { font-size: 14px; }
-#device caption { text-align: left; font-weight: bold; padding: 12px 0; }
+#device caption,
+#network caption {
+    padding: 16px 0 12px;
+    text-align: left;
+    font-size: 1.25rem;
+    font-weight: bold;
+}
 .device-state-idle { background: #dcfce7; color: #166534; }
 .device-state-busy { background: #fef3c7; color: #92400e; }
 .device-state-offline { background: #e5e7eb; color: #374151; }
@@ -600,13 +615,12 @@ input[aria-invalid="true"] {
 /* Network Manager uses existing cards, tables and metrics; no frontend library. */
 #network .card + .card { margin-top: 24px; }
 #network .network-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 14px; }
-#network input:not([type="checkbox"]), #network select { display: block; width: 100%; max-width: 100%; box-sizing: border-box; margin: 5px 0 12px; padding: 8px; }
+#network input:not([type="checkbox"]), #network select { display: block; margin: 5px 0 12px; }
 #network label { font-weight: 600; }
 #network .field-error { color: #b42318; }
 #network button:focus-visible, #network input:focus-visible, #network select:focus-visible, #network [tabindex]:focus-visible { outline: 3px solid #6c55f7; outline-offset: 3px; }
 #network button:disabled { opacity: .6; cursor: not-allowed; }
 #network .card, #network form { min-width: 0; }
-#network caption { text-align: left; font-weight: bold; padding: 12px 0; }
 #network td { overflow-wrap: anywhere; vertical-align: top; }
 #network .process-table { min-width: 620px; }
 #network .network-small-table { min-width: 320px; }
@@ -624,4 +638,4 @@ input[aria-invalid="true"] {
 .network-transmission { background: #bfdbfe; }
 .network-propagation { background: #ddd6fe; }
 .network-failure { background: #fecaca; }
-@media (max-width: 600px) { #network .card { padding: 14px; } #network-graph { min-height: 140px; } }
+@media (max-width: 600px) { #network-graph { min-height: 140px; } }

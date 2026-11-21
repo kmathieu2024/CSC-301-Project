@@ -9,13 +9,17 @@ function showPage(pageId, button) {
     document.getElementById(pageId).classList.add("active-page");
 
 
-    const buttons = document.querySelectorAll(".nav");
+    const buttons = document.querySelectorAll(".sidebar .nav");
 
     buttons.forEach(btn => {
-        btn.classList.remove("active");
+        const current = btn === button;
+        btn.classList.toggle("active", current);
+        if (current) {
+            btn.setAttribute("aria-current", "page");
+        } else {
+            btn.removeAttribute("aria-current");
+        }
     });
-
-    button.classList.add("active");
 }
 
 const algorithmSelect = document.getElementById("algorithm");
@@ -1057,7 +1061,8 @@ function renderProcessMetrics(result) {
             completed ? process.turnaround_time : null,
             process.response_time,
             process.dispatch_count,
-            process.preemption_count
+            process.preemption_count,
+            process.blocked_time
         ];
 
         values.forEach(function (value) {

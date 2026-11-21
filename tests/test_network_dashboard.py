@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 import json
+from pathlib import Path
 from threading import Thread
 from typing import Any
 
@@ -327,32 +328,84 @@ def test_combined_six_managers_apply_imported_security_policy(
     page: Page, network_url: str,
 ) -> None:
     page.goto(network_url)
-    data = workload()
-    data["devices"] = [{"device_id": "keyboard", "device_type": "KEYBOARD",
-                        "default_service_time": 1}]
-    data["memory"] = {"enabled": True, "frame_count": 1, "page_size": 4,
-                      "fault_latency": 1}
-    policy = {"enabled": True, "roles": [{"name": "worker",
-              "permissions": ["network:send", "file:create", "device:read"]}],
-              "users": [{"username": "P", "roles": ["worker"]}]}
-    data["security"] = policy
-    data["processes"][0].update(file_requests={"0": "CREATE /once"},
-        blocking_requests={"0": 1}, memory_references={"0": 0},
-        device_requests={"0": {"device_id": "keyboard", "operation": "READ"}})
+    fixture = (Path(__file__).resolve().parents[1] / "test_data" /
+               "milestone4" / "six_manager_integration.json")
     assert not json.loads(page.locator("#security-config").input_value())["enabled"]
-    load(page, data)
-    result = run(page)
+    tab(page, "Process")
+    page.locator("#process-file").set_input_files(fixture)
+    expect(page.locator("#upload-status")).to_contain_text("Loaded")
+    with page.expect_response("**/api/start") as start:
+        result = run(page)
+    assert start.value.status == 200
     assert result["security_enabled"] is True
     assert result["current_time"] == 6
     assert result["processes"][0]["blocked_time"] == 5
+    assert {event["manager"] for event in result["events"]} == {
+        "process", "memory", "file", "security", "device", "network",
+    }
     assert [(e["resource_type"], e["outcome"]) for e in result["security_events"]] == [
         ("file", "allowed"), ("device", "allowed"), ("network", "allowed"),
     ]
-    assert result["device_metrics"]["devices"]["keyboard"]["submitted"] == 1
-    assert result["memory_metrics"]["references"] == 1
+    expect(page.locator("#result-current-time")).to_have_text("6")
+    process_row = page.locator("#process-metrics-body tr").get_by_role("cell")
+    expect(process_row.nth(1)).to_have_text("TERMINATED")
+    expect(process_row.last).to_have_text("5")
+
+    tab(page, "Memory")
+    expect(page.locator("#memory-faults")).to_have_text("1")
+    tab(page, "File")
+    expect(page.locator("#file-tree-container")).to_contain_text("once")
+    expect(page.locator("#file-activity-body")).to_contain_text("CREATE /once")
+    expect(page.locator("#file-activity-body")).to_contain_text("Success")
+
+    tab(page, "Security")
+    audit_rows = page.locator("#security-audit-body tr").filter(
+        has=page.get_by_role("cell", name="allowed", exact=True)
+    )
+    expect(audit_rows).to_have_count(3)
+    for row, action, resource in zip(
+        audit_rows.all(), ("create", "read", "send"),
+        ("/once", "/devices/keyboard", "/nodes/a/to/b"),
+    ):
+        expect(row.get_by_role("cell").nth(1)).to_have_text("P")
+        expect(row.get_by_role("cell").nth(2)).to_have_text(action)
+        expect(row.get_by_role("cell").nth(3)).to_have_text(resource)
+
+    tab(page, "Device")
+    expect(page.locator("#device-metrics-body tr").get_by_role("cell").nth(1)).to_have_text("1")
+    expect(page.locator("#device-history-body")).to_contain_text("READ")
+    expect(page.locator("#device-timeline")).to_contain_text(
+        "keyboard · request-0 Request service (completed) | 2–3"
+    )
+    expect(page.locator("#device-timeline .device-service")).to_be_visible()
+
     tab(page, "Network")
+    expect(page.locator('#network-graph path[data-link-id="ab"]')).to_have_attribute(
+        "marker-end", "url(#network-arrow-up)"
+    )
+    expect(page.locator("#network-link-status-body tr").get_by_role("cell")).to_have_text(
+        ["ab", "a → b", "UP", "—", "0", "0"]
+    )
+    for outcome, count in [("Delivered", "1"), ("Dropped", "0"), ("Failed", "0"), ("Cancelled", "0")]:
+        metric = page.locator("#network-summary .metric").filter(
+            has=page.get_by_role("heading", name=f"{outcome} packets", exact=True)
+        )
+        expect(metric.locator("p")).to_have_text(count)
     expect(page.locator("#network-outcomes-body")).to_contain_text("DELIVERED")
-    assert json.loads(page.locator("#security-config").input_value()) == policy
+
+    # Replay with one permission removed to verify the denied audit display.
+    data = json.loads(fixture.read_text(encoding="utf-8"))
+    data["security"]["roles"][0]["permissions"].remove("network:send")
+    load(page, data)
+    run(page)
+    tab(page, "Security")
+    denied = page.locator("#security-audit-body tr").filter(
+        has=page.get_by_role("cell", name="denied", exact=True)
+    )
+    cells = denied.get_by_role("cell")
+    expect(cells.nth(1)).to_have_text("P")
+    expect(cells.nth(2)).to_have_text("send")
+    expect(cells.nth(3)).to_have_text("/nodes/a/to/b")
 
 
 def test_null_metrics_never_coerce_to_zero_or_percent_suffix(

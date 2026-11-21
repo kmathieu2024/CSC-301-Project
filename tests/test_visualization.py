@@ -23,6 +23,51 @@ def dashboard_url():
         server.server_close()
 
 
+def test_keyboard_navigation_keeps_one_current_workspace(page: Page, dashboard_url):
+    page.goto(dashboard_url)
+    expect(page.locator("html")).to_have_attribute("lang", "en")
+    sidebar = page.locator(".sidebar")
+    current = sidebar.locator('[aria-current="page"]')
+    expect(current).to_have_text("Overview")
+    expect(current).to_have_class("nav active")
+
+    page.keyboard.press("Tab")
+    expect(current).to_be_focused()
+    for name, control_id in [
+        ("Process", "run-button"),
+        ("Memory", "memory-policy"),
+        ("File", "file-request-command"),
+        ("Security", "security-config"),
+        ("Device", "device-id"),
+        ("Network", "network-node-id"),
+    ]:
+        page.keyboard.press("Tab")
+        button = sidebar.get_by_role("button", name=f"{name} Manager", exact=True)
+        expect(button).to_be_focused()
+        expect(button).to_have_css("outline-style", "solid")
+        page.keyboard.press("Enter")
+        expect(current).to_have_count(1)
+        expect(sidebar.locator(".nav.active")).to_have_count(1)
+        expect(current).to_have_text(f"{name} Manager")
+        expect(current).to_have_class("nav active")
+
+        # Tab through the visible panel and backtrack to resume sidebar navigation.
+        control = page.locator(f"#{control_id}")
+        expect(page.locator(".active-page")).to_have_attribute("id", name.lower())
+        for steps in range(1, 41):
+            page.keyboard.press("Tab")
+            if control.evaluate("(element) => document.activeElement === element"):
+                break
+        expect(control).to_be_focused()
+        assert control.evaluate("""element => {
+            const style = getComputedStyle(element);
+            return style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0;
+        }""")
+        for _ in range(steps):
+            page.keyboard.press("Shift+Tab")
+        expect(button).to_be_focused()
+
+
 def prepare_simulation(page: Page, url, algorithm="FCFS"):
     page.goto(url)
     page.get_by_role("button", name="Process Manager", exact=True).click()
@@ -84,10 +129,10 @@ def test_srtf_chart_shows_preemption(page: Page, dashboard_url):
     rows = page.locator("#process-metrics-body tr")
 
     expect(rows.nth(0).locator("td")).to_have_text(
-        ["P1", "TERMINATED", "0", "5", "0", "6", "1", "6", "0", "2", "1"]
+        ["P1", "TERMINATED", "0", "5", "0", "6", "1", "6", "0", "2", "1", "0"]
     )
     expect(rows.nth(1).locator("td")).to_have_text(
-        ["P2", "TERMINATED", "1", "1", "1", "2", "0", "1", "0", "1", "0"]
+        ["P2", "TERMINATED", "1", "1", "1", "2", "0", "1", "0", "1", "0", "0"]
     )
 
     expect(page.locator("#result-average-wait")).to_have_text("0.50")
@@ -173,8 +218,8 @@ def test_completed_visualizations(page: Page, dashboard_url, algorithm):
         intervals = ["0–2", "2–4", "4–5", "5–6"]
 
         expected_rows = [
-            ["P1", "TERMINATED", "2", "2", "2", "4", "0", "2", "0", "1", "0"],
-            ["P2", "TERMINATED", "2", "1", "5", "6", "3", "4", "3", "1", "0"],
+            ["P1", "TERMINATED", "2", "2", "2", "4", "0", "2", "0", "1", "0", "0"],
+            ["P2", "TERMINATED", "2", "1", "5", "6", "3", "4", "3", "1", "0", "0"],
         ]
 
     elif algorithm in ["SJF", "SRTF"]:
@@ -188,8 +233,8 @@ def test_completed_visualizations(page: Page, dashboard_url, algorithm):
         intervals = ["0–2", "2–3", "3–4", "4–6"]
 
         expected_rows = [
-            ["P1", "TERMINATED", "2", "2", "4", "6", "2", "4", "2", "1", "0"],
-            ["P2", "TERMINATED", "2", "1", "2", "3", "0", "1", "0", "1", "0"],
+            ["P1", "TERMINATED", "2", "2", "4", "6", "2", "4", "2", "1", "0", "0"],
+            ["P2", "TERMINATED", "2", "1", "2", "3", "0", "1", "0", "1", "0", "0"],
         ]
 
     else:  # Round Robin with quantum 1.
@@ -206,8 +251,8 @@ def test_completed_visualizations(page: Page, dashboard_url, algorithm):
         intervals = ["0–2", "2–3", "3–4", "4–5", "5–6", "6–7"]
 
         expected_rows = [
-            ["P1", "TERMINATED", "2", "2", "2", "7", "3", "5", "0", "2", "1"],
-            ["P2", "TERMINATED", "2", "1", "4", "5", "2", "3", "2", "1", "0"],
+            ["P1", "TERMINATED", "2", "2", "2", "7", "3", "5", "0", "2", "1", "0"],
+            ["P2", "TERMINATED", "2", "1", "4", "5", "2", "3", "2", "1", "0", "0"],
         ]
 
     expected_cards = {
@@ -315,10 +360,10 @@ def test_reset_clears_visualizations(page: Page, dashboard_url, reset_point):
     rows = page.locator("#process-metrics-body tr")
 
     expect(rows.nth(0).locator("td")).to_have_text(
-        ["P1", "NEW", "2", "2", "—", "—", "—", "—", "—", "0", "0"]
+        ["P1", "NEW", "2", "2", "—", "—", "—", "—", "—", "0", "0", "0"]
     )
     expect(rows.nth(1).locator("td")).to_have_text(
-        ["P2", "NEW", "2", "1", "—", "—", "—", "—", "—", "0", "0"]
+        ["P2", "NEW", "2", "1", "—", "—", "—", "—", "—", "0", "0", "0"]
     )
 
     # Verify stepping works again after reset.
