@@ -840,7 +840,10 @@
                 <p id="network-result-status" role="status"></p>
                 <div id="network-summary" class="metric-grid"></div>
                 <p>Utilization = serialization busy / elapsed time since reset. Throughput counts delivered packets / elapsed unit; goodput counts delivered payload bytes / elapsed unit. Queue waiting averages include all accepted packets; delivery latency averages delivered packets only. Unavailable values appear as —.</p>
-                <svg id="network-graph" role="img" aria-label="Directed network topology and availability" viewBox="0 0 760 360"></svg>
+                <div class="network-graph-scroll" tabindex="0" role="region" aria-label="Network topology diagram">
+                    <svg id="network-graph" role="img" aria-label="Directed network topology and availability" viewBox="0 0 760 360"></svg>
+                </div>
+                <p class="network-graph-scroll-hint">Scroll horizontally to see the full diagram.</p>
                 <p id="network-graph-empty"></p>
 <div class="table-container network-history" tabindex="0" role="region" aria-label="Node availability"><table class="process-table network-small-table"><caption>Node availability</caption><thead><tr><th scope="col">Node</th><th scope="col">Address</th><th scope="col">State</th></tr></thead><tbody id="network-node-status-body"></tbody></table></div>
 <div class="table-container network-history" tabindex="0" role="region" aria-label="Link availability"><table class="process-table"><caption>Link availability</caption><thead><tr><th scope="col">Link</th><th scope="col">Source → destination</th><th scope="col">State</th><th scope="col">Transmitting</th><th scope="col">Waiting</th><th scope="col">Propagating</th></tr></thead><tbody id="network-link-status-body"></tbody></table></div>

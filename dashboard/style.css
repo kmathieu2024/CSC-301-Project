@@ -629,6 +629,9 @@ input[aria-invalid="true"] {
 #network .network-history { max-height: 420px; overflow: auto; }
 #network-graph { width: 100%; min-height: 180px; max-height: 380px; }
 #network-graph[hidden] { display: none; }
+.network-graph-scroll { overflow-x: auto; }
+.network-graph-scroll:has(#network-graph[hidden]),
+.network-graph-scroll-hint { display: none; }
 .network-svg-label { font-size: 13px; paint-order: stroke; stroke: white; stroke-width: 4px; fill: #1f2937; }
 .network-timeline-row { margin: 14px 3px; font-size: 14px; }
 .network-track { position: relative; height: 16px; background: #f3f4f6; }
@@ -638,4 +641,14 @@ input[aria-invalid="true"] {
 .network-transmission { background: #bfdbfe; }
 .network-propagation { background: #ddd6fe; }
 .network-failure { background: #fecaca; }
-@media (max-width: 600px) { #network-graph { min-height: 140px; } }
+@media (max-width: 600px) {
+    #network-graph {
+        display: block;
+        min-width: 640px;
+        height: auto;
+        max-height: none;
+        font-size: 18px;
+    }
+    #network-graph .network-svg-label { font-size: 18px; }
+    .network-graph-scroll:has(#network-graph:not([hidden])) + .network-graph-scroll-hint { display: block; }
+}

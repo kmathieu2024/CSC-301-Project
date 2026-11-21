@@ -54,10 +54,14 @@ def test_keyboard_navigation_keeps_one_current_workspace(page: Page, dashboard_u
         # Tab through the visible panel and backtrack to resume sidebar navigation.
         control = page.locator(f"#{control_id}")
         expect(page.locator(".active-page")).to_have_attribute("id", name.lower())
-        for steps in range(1, 41):
+        steps = 0
+        while not control.evaluate("(element) => document.activeElement === element"):
             page.keyboard.press("Tab")
-            if control.evaluate("(element) => document.activeElement === element"):
-                break
+            steps += 1
+            assert button.evaluate("""element =>
+                document.activeElement !== document.body &&
+                document.activeElement !== element
+            """), f"Tab order ended before reaching #{control_id}"
         expect(control).to_be_focused()
         assert control.evaluate("""element => {
             const style = getComputedStyle(element);
