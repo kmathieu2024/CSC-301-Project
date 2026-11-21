@@ -139,8 +139,17 @@ def test_denied_file_request_creates_security_alert_and_file_error():
     security = SecurityManager()
     security.add_user("P1")
     process = Process("P1", 0, 1, file_requests={0: "CREATE /secret.txt"})
-    results = SimulationEngine([process], security_manager=security).run()
+    security.create_role("inspector", ["file:list", "file:read"])
+    security.add_user("inspector", ["inspector"])
+    file_manager = FileManager()
+    file_manager.create_file("/existing.txt", "unchanged")
+    directory_before = file_manager.list_directory("/")
+    results = SimulationEngine(
+        [process], file_manager=file_manager, security_manager=security
+    ).run()
 
+    assert file_manager.list_directory("/", user="inspector") == directory_before
+    assert file_manager.read_file("/existing.txt", user="inspector") == "unchanged"
     assert results["security_alerts"][0]["event_type"] == "security_alert"
     assert results["security_alerts"][0]["severity"] == "warning"
     assert results["security_alerts"][0]["outcome"] == "denied"
@@ -156,12 +165,13 @@ def test_audit_history_survives_reset_and_grows_on_replay():
     engine = SimulationEngine([process], security_manager=security)
 
     engine.run()
-    first_count = len(engine.results()["audit_log"])
+    first_audit = engine.results()["audit_log"]
     engine.reset()
     engine.run()
     results = engine.results()
 
-    assert len(results["audit_log"]) == first_count + 1
+    assert len(results["audit_log"]) == len(first_audit) + 1
+    assert results["audit_log"][:-1] == first_audit
     assert len(results["security_alerts"]) == 2
     this_runs_events = [event for event in results["events"] if event["manager"] == "security"]
     assert len(this_runs_events) == 1
