@@ -75,7 +75,7 @@ function renderSecurityManager(results) {
         record => record.timestamp,
         record => record.actor,
         record => record.action,
-        record => record.entity_id,
+        record => record.resource ?? record.entity_id,
         record => record.outcome,
         record => record.message
     ], "No audit records available.");

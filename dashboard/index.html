@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CSC 301 OS Simulator</title>
@@ -13,7 +13,7 @@
         <h1>CSC 301</h1>
         <p>OS Simulator</p>
 
-        <button class="nav active" onclick="showPage('overview', this)">Overview</button>
+        <button class="nav active" aria-current="page" onclick="showPage('overview', this)">Overview</button>
         <button class="nav" onclick="showPage('process', this)">Process Manager</button>
         <button class="nav" onclick="showPage('memory', this)">Memory Manager</button>
         <button class="nav" onclick="showPage('file', this)">File Manager</button>
@@ -281,11 +281,12 @@
                                 <th scope="col">Response</th>
                                 <th scope="col">Dispatches</th>
                                 <th scope="col">Preemptions</th>
+                                <th scope="col">Blocked time</th>
                             </tr>
                         </thead>
                         <tbody id="process-metrics-body">
                             <tr>
-                                <td colspan="11">Start a simulation to view process metrics.</td>
+                                <td colspan="12">Start a simulation to view process metrics.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -299,7 +300,7 @@
     <section class="card manager-test-controls">
         <h2>Memory Test Scenario</h2>
         <div class="control-buttons">
-            <button id="load-memory-test" type="button" aria-describedby="memory-test-note">Load Test Scenario</button>
+            <button id="load-memory-test" class="primary" type="button" aria-describedby="memory-test-note">Load Test Scenario</button>
         </div>
         <p id="memory-test-note">Replaces the current workload and clears previous results. Use Run or Step in Process Manager to execute it.</p>
         <p id="memory-test-status" role="status"></p>
@@ -535,7 +536,7 @@
     <section class="card manager-test-controls">
         <h2>File Test Scenario</h2>
         <div class="control-buttons">
-            <button id="load-file-test" type="button" aria-describedby="file-test-note">Load Test Scenario</button>
+            <button id="load-file-test" class="primary" type="button" aria-describedby="file-test-note">Load Test Scenario</button>
         </div>
         <p id="file-test-note">Replaces the current workload and clears previous results. Use Run or Step in Process Manager to execute it.</p>
         <p id="file-test-status" role="status"></p>
@@ -713,7 +714,7 @@
             <p>Configure peripherals and synchronous I/O at process CPU-execution offsets.</p>
             <section class="card">
                 <h2>Device configuration</h2>
-                <button id="load-device-demo" class="memory-secondary" type="button">Load device demonstration</button>
+                <button id="load-device-demo" class="primary" type="button">Load device demonstration</button>
                 <p id="device-demo-status" role="status"></p>
                 <form id="device-form" novalidate aria-describedby="device-config-error">
                     <div class="process-fields">
@@ -778,14 +779,14 @@
             <p>Configure directed links and synchronous packet sends. All times use simulated units; full duplex needs two directed links.</p>
             <section class="card">
                 <h2>Network settings</h2>
-                <button id="load-network-demo" type="button" class="memory-secondary">Load network failure demonstration</button>
+                <button id="load-network-demo" type="button" class="primary">Load network failure demonstration</button>
                 <p id="network-demo-status" role="status"></p>
                 <p>Combined imports apply their explicit Security policy after complete candidate validation. Imports that omit Security retain the editor's current policy.</p>
                 <form id="network-settings-form" novalidate aria-describedby="network-settings-error">
                     <label><input id="network-enabled" type="checkbox"> Enable networking</label>
                     <label for="network-hop-limit">Network hop limit</label><input id="network-hop-limit" type="number" min="1" step="1" value="16">
                     <p id="network-settings-error" class="field-error" role="alert" tabindex="-1"></p>
-                    <button type="submit">Save network settings</button>
+                    <button type="submit" class="primary">Save network settings</button>
                 </form>
             </section>
             <section class="card">
@@ -794,7 +795,7 @@
                     <div class="network-fields"><div><label for="network-node-id">Node ID</label><input id="network-node-id" ></div><div><label for="network-node-address">Node address (optional)</label><input id="network-node-address" ></div></div>
                     <p id="network-node-edit-status" role="status"></p>
                     <p id="network-node-error" class="field-error" role="alert" tabindex="-1"></p>
-                    <button id="network-node-save" type="submit">Save node</button>
+                    <button id="network-node-save" type="submit" class="primary">Save node</button>
                     <button id="network-node-clear" type="button" class="memory-secondary">Clear node draft</button>
                 </form>
                 <div class="table-container network-history" tabindex="0" role="region" aria-label="Nodes"><table class="process-table network-small-table"><caption>Nodes</caption><thead><tr><th scope="col">Node</th><th scope="col">Address</th><th scope="col">Actions</th></tr></thead><tbody id="network-node-body"></tbody></table></div>
@@ -805,7 +806,7 @@
                     <div class="network-fields"><div><label for="network-link-id">Link ID</label><input id="network-link-id" ></div><div><label for="network-link-source">Link source</label><select id="network-link-source" ></select></div><div><label for="network-link-destination">Link destination</label><select id="network-link-destination" ></select></div><div><label for="network-bandwidth">Bandwidth (bytes / time unit)</label><input id="network-bandwidth" type="number" min="0" step="any" value="100"></div><div><label for="network-delay">Propagation delay (time units)</label><input id="network-delay" type="number" min="0" step="any" value="1"></div><div><label for="network-cost">Static routing cost</label><input id="network-cost" type="number" min="0" step="any" value="1"></div><div><label for="network-policy">Link queue policy</label><select id="network-policy"><option>FIFO</option><option>PRIORITY</option></select></div><div><label for="network-capacity">Waiting capacity (packets)</label><input id="network-capacity" type="number" min="0" step="1" value="4"></div></div>
                     <p id="network-link-edit-status" role="status"></p>
                     <p id="network-link-error" class="field-error" role="alert" tabindex="-1"></p>
-                    <button id="network-link-save" type="submit">Save link</button>
+                    <button id="network-link-save" type="submit" class="primary">Save link</button>
                     <button id="network-link-clear" type="button" class="memory-secondary">Clear link draft</button>
                 </form>
                 <div class="table-container network-history" tabindex="0" role="region" aria-label="Directed links"><table class="process-table"><caption>Directed links</caption><thead><tr><th scope="col">Link</th><th scope="col">Source → destination</th><th scope="col">Bandwidth</th><th scope="col">Propagation</th><th scope="col">Cost</th><th scope="col">Policy</th><th scope="col">Capacity</th><th scope="col">Actions</th></tr></thead><tbody id="network-link-body"></tbody></table></div>
@@ -817,7 +818,7 @@
                     <div class="network-fields"><div><label for="network-request-pid">Packet process</label><select id="network-request-pid" ></select></div><div><label for="network-request-offset">Packet CPU offset</label><input id="network-request-offset" type="number" min="0" step="1" value="0"></div><div><label for="network-request-source">Packet source</label><select id="network-request-source" ></select></div><div><label for="network-request-destination">Packet destination</label><select id="network-request-destination" ></select></div><div><label for="network-size">Packet size (bytes)</label><input id="network-size" type="number" min="1" step="1" value="100"></div><div><label for="network-priority">Packet priority (lower first)</label><input id="network-priority" type="number" min="0" step="1" value="1"></div></div>
                     <p id="network-request-edit-status" role="status"></p>
                     <p id="network-request-error" class="field-error" role="alert" tabindex="-1"></p>
-                    <button id="network-request-save" type="submit">Save request</button>
+                    <button id="network-request-save" type="submit" class="primary">Save request</button>
                     <button id="network-request-clear" type="button" class="memory-secondary">Clear request draft</button>
                 </form>
                 <div class="table-container network-history" tabindex="0" role="region" aria-label="Process packet requests"><table class="process-table"><caption>Process packet requests</caption><thead><tr><th scope="col">PID</th><th scope="col">Offset</th><th scope="col">Source</th><th scope="col">Destination</th><th scope="col">Bytes</th><th scope="col">Priority</th><th scope="col">Actions</th></tr></thead><tbody id="network-request-body"></tbody></table></div>
@@ -829,7 +830,7 @@
                     <div class="network-fields"><div><label for="network-event-time">Topology timestamp</label><input id="network-event-time" type="number" min="0" step="any" value="0.5"></div><div><label for="network-event-action">Topology action</label><select id="network-event-action"><option>LINK_DOWN</option><option>LINK_UP</option><option>NODE_DOWN</option><option>NODE_UP</option></select></div><div><label for="network-event-target">Topology target</label><select id="network-event-target" ></select></div></div>
                     <p id="network-event-edit-status" role="status"></p>
                     <p id="network-event-error" class="field-error" role="alert" tabindex="-1"></p>
-                    <button id="network-event-save" type="submit">Save event</button>
+                    <button id="network-event-save" type="submit" class="primary">Save event</button>
                     <button id="network-event-clear" type="button" class="memory-secondary">Clear event draft</button>
                 </form>
                 <div class="table-container network-history" tabindex="0" role="region" aria-label="Scheduled topology events"><table class="process-table"><caption>Scheduled topology events</caption><thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Actions</th></tr></thead><tbody id="network-event-body"></tbody></table></div>
@@ -839,7 +840,10 @@
                 <p id="network-result-status" role="status"></p>
                 <div id="network-summary" class="metric-grid"></div>
                 <p>Utilization = serialization busy / elapsed time since reset. Throughput counts delivered packets / elapsed unit; goodput counts delivered payload bytes / elapsed unit. Queue waiting averages include all accepted packets; delivery latency averages delivered packets only. Unavailable values appear as —.</p>
-                <svg id="network-graph" role="img" aria-label="Directed network topology and availability" viewBox="0 0 760 360"></svg>
+                <div class="network-graph-scroll" tabindex="0" role="region" aria-label="Network topology diagram">
+                    <svg id="network-graph" role="img" aria-label="Directed network topology and availability" viewBox="0 0 760 360"></svg>
+                </div>
+                <p class="network-graph-scroll-hint">Scroll horizontally to see the full diagram.</p>
                 <p id="network-graph-empty"></p>
 <div class="table-container network-history" tabindex="0" role="region" aria-label="Node availability"><table class="process-table network-small-table"><caption>Node availability</caption><thead><tr><th scope="col">Node</th><th scope="col">Address</th><th scope="col">State</th></tr></thead><tbody id="network-node-status-body"></tbody></table></div>
 <div class="table-container network-history" tabindex="0" role="region" aria-label="Link availability"><table class="process-table"><caption>Link availability</caption><thead><tr><th scope="col">Link</th><th scope="col">Source → destination</th><th scope="col">State</th><th scope="col">Transmitting</th><th scope="col">Waiting</th><th scope="col">Propagating</th></tr></thead><tbody id="network-link-status-body"></tbody></table></div>
@@ -864,7 +868,7 @@
                 <h2>Multicore Performance Comparison</h2>
                 <p>This comparison uses the standalone FCFS parallel simulator.</p>
 
-                <button type="button" id="parallel-compare-button">
+                <button type="button" id="parallel-compare-button" class="primary">
                     Compare 1, 2, and 4 Cores
                 </button>
 
