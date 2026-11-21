@@ -90,22 +90,41 @@ Run all tests:
 python -m pytest -q
 ```
 
-GitHub Actions automatically runs the main test suite
-on pushes and pull requests using Python 3.11.
+GitHub Actions starts Flask and uses Chromium to run the simulator and
+parallel computing suites together:
 
-As of November 9, 2026, the latest verified main-branch
-GitHub Actions run reported:
+```bash
+python -m pytest tests/ test_parallel.py -v
+```
 
-- 163 passed
-- 3 expected failures
-- 0 unexpected failures
+Run these commands separately to verify each manager. Process includes
+the scheduling engine's timing and blocking checks. Memory includes both
+direct manager and engine tests.
 
-The three expected failures concern unsupported file
-command aliases: `mkfile`, `cat`, and `rm`.
+```sh
+# Process
+python -m pytest -v tests/test_fcfs_baseline.py tests/test_fcfs_pid_tie.py tests/test_sjf_baseline.py tests/test_sjf_pid_tie.py tests/test_srtf_baseline.py tests/test_srtf_ties.py tests/test_rr_baseline.py tests/test_rr_pid_arrivals.py tests/test_priority_baseline.py tests/test_priority_pid_tie.py tests/test_priority_aging.py tests/test_priority_minimum.py tests/test_blocking.py
 
-These results describe the CI-configured `tests/` suite.
-The separate `test_parallel.py` module is not included
-in that workflow's test command.
+# Memory
+python -m pytest -v tests/test_memory_integration.py
+
+# File
+python -m pytest -v tests/test_file_manager.py
+
+# Security
+python -m pytest -v tests/test_security_manager.py
+
+# Device
+python -m pytest -v tests/test_device_manager.py tests/test_device_models.py tests/test_device_scheduler.py tests/test_device_validation.py
+
+# Network
+python -m pytest -v tests/test_network_manager.py tests/test_network_models.py tests/test_network_routing.py tests/test_network_scheduler.py tests/test_network_validation.py
+```
+
+File Manager intentionally reports three historical expected failures for
+command aliases documented in its status section. See the
+[Milestone 4 defect list](docs/milestone4_defects.md) and
+[final-month experiment plan](docs/milestone4_experiment_plan.md).
 
 ## Development Workflow
 1. Create a branch for your assigned task.
@@ -162,7 +181,7 @@ See docs/git_workflow.md for details.
   Security Manager dashboard workspace.
 - Implemented the Network Manager, deterministic routing and packet scheduling,
   simulation/Security integration, JSON inputs, and dashboard topology/results.
-- Complete integration of all six managers through the simulation engine.
+- Added an integrated workload that exercises all six managers through the simulation engine.
 - Complete the remaining dashboard workspaces.
 - Expand independent manager and system integration testing.
 - Finalize performance experiments, documentation,
@@ -170,18 +189,28 @@ See docs/git_workflow.md for details.
 
 ### Running the Simulation Dashboard
 
-1. Install the dependencies:
-   python -m pip install -r requirements.txt
-2. Start the application:
-   python app.py
-3. Open http://127.0.0.1:5000/ in your browser.
-4. Use Run, Pause, Step, or Reset to control the simulation.
-5. In Process Manager, select **Download results (JSON)** to save the displayed
-   simulation snapshot as `simulation-results.json`. The download includes the
-   algorithm, simulation time, seed, process metrics, averages, CPU utilization,
-   timeline, and event history returned by the simulator. Partial runs and reset
-   snapshots can also be exported; averages are final only after completion.
-   The button becomes available once simulation results have been displayed.
+1. Install dependencies as shown under Installation, then run `python app.py`
+   from the repository root.
+2. Open [the local dashboard](http://127.0.0.1:5000/). Use the navigation
+   buttons to open Process Manager (scheduling and CPU results), Memory
+   Manager (references and frames), File Manager (operations and tree),
+   Security Manager (policy and audit history), Device Manager (queues and
+   timelines), and Network Manager (topology and packet results).
+3. In Process Manager, use Run, Pause, Step, or Reset. Select
+   **Download results (JSON)** after results appear to save the simulation
+   snapshot as `simulation-results.json`. Partial snapshots can also be
+   exported. Averages are final once the simulation completes.
+
+#### Reproduce the six-manager integration scenario
+
+1. Start Flask and open Process Manager. Use **Upload process file** to
+   select [six_manager_integration.json](test_data/milestone4/six_manager_integration.json).
+   Wait for validation to finish.
+2. Select **Run**, wait for completion, and download the results.
+3. Check `current_time` for 6.0 and process P's `blocked_time` for 5.0.
+   The shared `events` should contain all six manager names. The
+   `security_events` should record allowed File, Device, and Network requests.
+   See the [fixture's expected results](test_data/expected_results/six_manager_integration_expected.md).
 
 ### Memory simulation
 
