@@ -451,10 +451,16 @@
                 <h3>Occupied Frames</h3>
                 <p id="memory-used-frames">—</p>
             </div>
+            <div class="metric">
+                <h3>Average Memory Access Time (simulation units)</h3>
+                <p id="memory-average-access-time">—</p>
+            </div>
         </div>
-        <p>Rates use executed references; both are 0% before any reference executes.
+        <p>Rates use executed references; both are 0% before any reference executes. Average access time
+        is shown after the first reference; it assumes a 1-unit base access and adds the
+        configured fault latency for each fault.
         Cumulative modeled fault latency is the sum charged to faults, not elapsed simulation delay
-        or total/average access time. Configured latency per fault is not included in result snapshots.</p>
+        or average access time.</p>
     </section>
 
     <section class="card">
@@ -477,6 +483,18 @@
                     </tr>
                 </thead>
                 <tbody id="memory-mapping-body"><tr><td colspan="3">Start a simulation to view resident mappings.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Frame Occupancy History</h2>
+        <p>Snapshots are recorded when frames are allocated, replaced, or released. This preserves
+        earlier allocations after the current frame view changes.</p>
+        <div class="table-container">
+            <table class="process-table" aria-label="Frame Occupancy History">
+                <thead><tr id="memory-occupancy-head"></tr></thead>
+                <tbody id="memory-occupancy-body"><tr><td>Start a simulation to view frame occupancy changes.</td></tr></tbody>
             </table>
         </div>
     </section>
