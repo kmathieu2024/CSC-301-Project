@@ -100,7 +100,12 @@ class MemoryManager:
 
     def metrics(self):
         references = self.hits + self.faults
+        average_access_time = (
+            ((self.hits * 1) + (self.faults * (1 + self.fault_latency))) / references
+            if references else None
+        )
         return {"references": references, "hits": self.hits, "faults": self.faults,
                 "evictions": self.evictions, "fault_rate": self.faults / references if references else 0,
                 "fault_latency": self.faults * self.fault_latency,
+                "average_access_time": average_access_time,
                 "used_frames": sum(frame is not None for frame in self.frames)}

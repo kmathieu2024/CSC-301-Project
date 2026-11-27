@@ -16,7 +16,10 @@ function renderMemoryManager(results) {
         "memory-hit-rate": metrics
             ? ((metrics.references ? metrics.hits / metrics.references : 0) * 100).toFixed(1) + "%"
             : "—",
-        "memory-total-fault-latency": metrics?.fault_latency ?? "—"
+        "memory-total-fault-latency": metrics?.fault_latency ?? "—",
+        "memory-average-access-time": Number.isFinite(metrics?.average_access_time)
+            ? Number(metrics.average_access_time).toFixed(2)
+            : "—"
     };
 
     for (const [id, value] of Object.entries(values)) {
@@ -25,6 +28,9 @@ function renderMemoryManager(results) {
 
     renderMemoryMappings(frames, Boolean(metrics));
     renderMemoryHistory(results.events || [], Boolean(metrics));
+    renderMemoryOccupancyHistory(
+        results.memory_occupancy_history || [], Boolean(metrics)
+    );
     renderProcessTransitions(results.events || []);
 
     const container = document.getElementById("memory-frame-grid");
@@ -55,6 +61,50 @@ function renderMemoryManager(results) {
         card.append(heading, content);
         container.appendChild(card);
     });
+}
+
+function renderMemoryOccupancyHistory(history, enabled) {
+    const head = document.getElementById("memory-occupancy-head");
+    const body = document.getElementById("memory-occupancy-body");
+    head.replaceChildren();
+    body.replaceChildren();
+
+    const frameCount = history.length
+        ? history[history.length - 1].frames.length
+        : 0;
+    const headings = ["Snapshot", "Timestamp", "Change", "PID"];
+    for (let index = 0; index < frameCount; index += 1) {
+        headings.push("Frame " + index);
+    }
+    for (const label of headings) {
+        const cell = document.createElement("th");
+        cell.scope = "col";
+        cell.textContent = label;
+        head.appendChild(cell);
+    }
+
+    if (!history.length) {
+        const row = body.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = headings.length;
+        cell.textContent = enabled
+            ? "No frame occupancy changes recorded yet."
+            : "Memory simulation is disabled; no frame occupancy history.";
+        return;
+    }
+
+    for (const snapshot of history) {
+        const row = body.insertRow();
+        const values = [snapshot.sequence, snapshot.timestamp, snapshot.change, snapshot.pid];
+        for (const frame of snapshot.frames) {
+            values.push(frame.pid === null
+                ? "Empty"
+                : frame.pid + " / page " + frame.page);
+        }
+        for (const value of values) {
+            row.insertCell().textContent = value ?? "—";
+        }
+    }
 }
 // Rebuild from the accumulated snapshot, never append to earlier snapshots.
 // textContent keeps process IDs and explicitly recorded messages inert.

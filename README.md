@@ -236,6 +236,13 @@ translation and any evicted `(pid, page)` pair. `memory.frames`,
 `memory.page_tables`, and `memory.metrics()` expose current state; reset clears
 memory and counters. Simulation reset also resets its memory manager.
 
+`memory.metrics()` returns `average_access_time` in simulation units. It assumes
+a base hit access time of 1 unit and adds the configured `fault_latency` to each
+fault, averaged over all references. It is `None` until at least one reference
+has executed. Simulation results also include `memory_occupancy_history`, with
+timestamped frame snapshots for initial occupancy, allocations, replacements,
+and process releases; the dashboard displays these snapshots as a table.
+
 #### Memory Manager Status
 
 The Memory Manager currently supports FIFO and LRU page

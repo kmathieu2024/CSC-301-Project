@@ -136,6 +136,9 @@ class SimulationEngine:
         self.current_time = 0
         self.events = []
         self.timeline = []
+        self.memory_occupancy_history = []
+        if self.memory_manager is not None:
+            self._record_memory_occupancy("initial")
         self.event_queue = []
         self.completed = 0
         self.last_pid = None
@@ -177,6 +180,31 @@ class SimulationEngine:
             )
         for event in self.network_events:
             self.schedule_event(event.timestamp, "network_topology", event)
+
+    def _memory_frames_snapshot(self):
+        if self.memory_manager is None:
+            return []
+        return [
+            {
+                "frame": index,
+                "pid": entry[0] if entry is not None else None,
+                "page": entry[1] if entry is not None else None,
+            }
+            for index, entry in enumerate(self.memory_manager.frames)
+        ]
+
+    def _record_memory_occupancy(self, change, pid=None):
+        frames = self._memory_frames_snapshot()
+        if (self.memory_occupancy_history and
+                frames == self.memory_occupancy_history[-1]["frames"]):
+            return
+        self.memory_occupancy_history.append({
+            "sequence": len(self.memory_occupancy_history),
+            "timestamp": self.current_time,
+            "change": change,
+            "pid": pid,
+            "frames": frames,
+        })
 
     def schedule_event(self, time, event_type, process):
         # Store upcoming events in chronological order.
@@ -1071,6 +1099,11 @@ class SimulationEngine:
                             "address": result.address, "page": result.page, "frame": result.frame,
                             "physical_address": result.physical_address, "evicted": result.evicted,
                         })
+                        if result.fault:
+                            self._record_memory_occupancy(
+                                "replacement" if result.evicted else "allocation",
+                                process.pid,
+                            )
                         if result.latency:
                             self.memory_manager.protect(process, page)
                             self._memory_pending.add(key)
@@ -1198,6 +1231,7 @@ class SimulationEngine:
 
                 if self.memory_manager is not None:
                     self.memory_manager.release(process)
+                    self._record_memory_occupancy("release", process.pid)
                 self.completed += 1
 
                 self.log(
@@ -1508,6 +1542,13 @@ class SimulationEngine:
                 }
                 for index, entry in enumerate(self.memory_manager.frames)
             ] if self.memory_manager is not None else [],
+            "memory_occupancy_history": [
+                {
+                    **snapshot,
+                    "frames": [frame.copy() for frame in snapshot["frames"]],
+                }
+                for snapshot in self.memory_occupancy_history
+            ],
             "file_tree": self.get_file_tree(),
             "file_storage_used": self.file_manager.storage_used(),
             "security_enabled": self.security_manager is not None,
